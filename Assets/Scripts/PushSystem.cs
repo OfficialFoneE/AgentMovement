@@ -8,10 +8,16 @@ using Unity.Transforms;
 
 public struct AgentComponent : IComponentData
 {
-    public float Radius;
+    public float BaseRadius;
+
+    public float Radius => BaseRadius; // BaseRadius * math.lerp(1.0f, 1.25f, math.smoothstep(3, 6, CorrectionCount));
 
     /// 0 = highest priority (moves least), 99 = lowest priority (moves most)
     public int AvoidancePriority;
+
+    /// The last updates correction count.
+    // If we are being influences by too many neighbors then we expand our radius.
+    public int CorrectionCount;
 
     public FixedList128Bytes<int> Indicies;
 }
@@ -51,7 +57,10 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
     //[BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        spatialGrid.Draw();
+        if (Boostrap.Instance.DrawGrid)
+        {
+            spatialGrid.Draw();
+        }
 
         for (int i = 0; i < Iterations; i++)
         {
@@ -313,6 +322,8 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             }
 
             agent.Indicies.Clear();
+
+            agent.CorrectionCount = correctionCount;
 
             if (correctionCount > 0)
             {

@@ -257,8 +257,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe79b5ae7e04548438dfe427e6e4c561, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  DrawRadiuses: 1
+  DrawGrid: 1
   unitMaterial: {fileID: 2100000, guid: ec5ec4a618961cb41ab1dc807d499d63, type: 2}
-  unitMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
+  unitMesh: {fileID: 5923874233022535320, guid: f9ee504498bd09c46a8c441a8acc34e8, type: 3}
   colliderMaterial: {fileID: 2100000, guid: 1909d723034db774586e226da067c3d7, type: 2}
   colliderMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   targetDesintation: {fileID: 788662759}

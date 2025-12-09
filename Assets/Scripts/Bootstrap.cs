@@ -7,6 +7,11 @@ using UnityEngine;
 
 public class Boostrap : MonoBehaviour
 {
+    public static Boostrap Instance;
+
+    public bool DrawRadiuses = true;
+    public bool DrawGrid = true;
+
     public Material unitMaterial;
     public Mesh unitMesh;
 
@@ -29,6 +34,11 @@ public class Boostrap : MonoBehaviour
 
     private Entity destinationSingleton;
     private Entity seperationSingleton;
+
+    private void Awake()
+    {
+        Instance = this;
+    }
 
     // Start is called before the first frame update
     private void Start()
@@ -151,7 +161,7 @@ public class Boostrap : MonoBehaviour
 
         entityManager.SetComponentData(unit, new AgentComponent
         {
-            Radius = size/* * 0.5f*/,
+            BaseRadius = size/* * 0.5f*/,
             AvoidancePriority = 50,
         });
 

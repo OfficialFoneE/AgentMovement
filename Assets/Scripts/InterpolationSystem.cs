@@ -28,6 +28,9 @@ public partial struct DrawCollidersSystem : ISystem
 {
     public void OnUpdate(ref SystemState state)
     {
+        if (Boostrap.Instance.DrawRadiuses == false)
+            return;
+
         var builder = DrawingManager.GetBuilder(true);
 
         builder.Preallocate(10000);
@@ -36,6 +39,7 @@ public partial struct DrawCollidersSystem : ISystem
         {
             var t = simTransform.ValueRO.Value;
             //builder.PushMatrix(float4x4.TRS(t.Position, t.Rotation, new float3(ellipse.ValueRO.Radius, 1, ellipse.ValueRO.Radius)));
+            builder.xz.Circle(t.Position.xz, ellipse.ValueRO.BaseRadius);
             builder.xz.Circle(t.Position.xz, ellipse.ValueRO.Radius);
             //builder.PopMatrix();
         }
