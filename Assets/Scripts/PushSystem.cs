@@ -1,3 +1,4 @@
+using Drawing;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -8,10 +9,8 @@ using Unity.Transforms;
 
 public struct AgentComponent : IComponentData
 {
-    public float ForwardRadius;      // Semi-axis along forward
-    public float RightRadius;        // Semi-axis perpendicular to forward
-
-    public float Radius => math.max(ForwardRadius, RightRadius); // BaseRadius * math.lerp(1.0f, 1.25f, math.smoothstep(3, 6, CorrectionCount));
+    public float Length;      // Semi-axis along forward
+    public float Radius;        // Semi-axis perpendicular to forward
 
     /// 0 = highest priority (moves least), 99 = lowest priority (moves most)
     public int AvoidancePriority;
@@ -21,19 +20,33 @@ public struct AgentComponent : IComponentData
     public int CorrectionCount;
 
     public FixedList128Bytes<int> Indicies;
+
+    public void GetMinMax(float2 position, float2 forward, out float2 min, out float2 max)
+    {
+        var p1 = position - forward * Length;
+        var p2 = position + forward * Length;
+        min = math.min(p1 - Radius, p2 - Radius);
+        max = math.max(p1 + Radius, p2 + Radius);
+    }
 }
 
 public struct AgentSpatialData : IComponentData
 {
     public float2 Position;
     public float2 Forward;
-    public float ForwardRadius;      // Semi-axis along forward
-    public float RightRadius;        // Semi-axis perpendicular to forward
+    public float Length;      // Semi-axis along forward
+    public float Radius;        // Semi-axis perpendicular to forward
     public float2 CorectionOffset;
     public int CorrectionCount;
     public float Priority;
 
-    public float Radius => math.max(ForwardRadius, RightRadius);
+    public void GetMinMax(out float2 min, out float2 max)
+    {
+        var p1 = Position - Forward * Length * 0.5f;
+        var p2 = Position + Forward * Length * 0.5f;
+        min = math.min(p1 - Radius, p2 - Radius);
+        max = math.max(p1 + Radius, p2 + Radius);
+    }
 }
 
 [BurstCompile]
@@ -42,7 +55,7 @@ public struct AgentSpatialData : IComponentData
 public partial struct NavAgentOverlapResolutionSystem : ISystem
 {
     const int Iterations = 10;    // Number of positional solver iterations
-    const float SeparationBias = 1.1f;//1.05f;
+    const float SeparationBias = 1.1f;//1.05f;//1.1f;//1.05f;
 
     private readonly static int2 mapSize = new int2(512, 512) * 4;
     private readonly static int cellSize = 16;
@@ -94,6 +107,7 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                 spatialData = spatialGrid.cellData,
             };
 
+
             var ProcessHardForces = new ProcessHardForces()
             {
                 activeCells = spatialGrid.activeCells.AsDeferredJobArray(),
@@ -104,9 +118,13 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                 SeparationBias = SeparationBias,
             };
 
+            var builder = DrawingManager.GetBuilder();
+            builder.Preallocate(10000);
+
             var IJobEntity_WriteHardForces = new IJobEntity_WriteHardForces()
             {
                 spatialData = spatialGrid.cellData,
+                commandBuilder = builder,
             };
 
             state.Dependency = resetJob.Schedule(state.Dependency);
@@ -115,6 +133,7 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             state.Dependency = PopulateHardForceGridData.ScheduleParallel(state.Dependency);
             state.Dependency = ProcessHardForces.Schedule(spatialGrid.activeCells, 1, state.Dependency);
             state.Dependency = IJobEntity_WriteHardForces.ScheduleParallel(state.Dependency);
+            builder.DisposeAfter(state.Dependency);
         }
 
         state.Dependency.Complete();
@@ -132,11 +151,11 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
         {
             agent.Indicies.Clear();
 
-            var min = simTranslation.Value.Position.xz - agent.Radius;
-            var max = simTranslation.Value.Position.xz + agent.Radius;
-
-            var minCell = gridProperties.GetCellKeyClamped(min);
-            var maxCell = gridProperties.GetCellKeyClamped(max);
+            //var min = simTranslation.Value.Position.xz - agent.Radius;
+            //var max = simTranslation.Value.Position.xz + agent.Radius;
+            agent.GetMinMax(simTranslation.Value.Position.xz, math.normalize(simTranslation.Value.Forward().xz), out var agentMinimum, out var agentMaximum);
+            var minCell = gridProperties.GetCellKeyClamped(agentMinimum);
+            var maxCell = gridProperties.GetCellKeyClamped(agentMaximum);
 
             for (int y = minCell.y; y <= maxCell.y; y++)
             {
@@ -176,18 +195,22 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             {
                 Position = simTranslation.Value.Position.xz,
                 Forward = math.normalize(simTranslation.Value.Forward().xz),
-                ForwardRadius = agent.ForwardRadius,
-                RightRadius = agent.RightRadius,
+                Length = agent.Length,
+                Radius = agent.Radius,
                 Priority = 50,
                 CorectionOffset = 0,
                 CorrectionCount = 0,
             };
 
-            var min = simTranslation.Value.Position.xz - agent.Radius;
-            var max = simTranslation.Value.Position.xz + agent.Radius;
+            agent.GetMinMax(simTranslation.Value.Position.xz, math.normalize(simTranslation.Value.Forward().xz), out var agentMinimum, out var agentMaximum);
+            var minCell = gridProperties.GetCellKeyClamped(agentMinimum);
+            var maxCell = gridProperties.GetCellKeyClamped(agentMaximum);
 
-            var minCell = gridProperties.GetCellKeyClamped(min);
-            var maxCell = gridProperties.GetCellKeyClamped(max);
+            //var min = simTranslation.Value.Position.xz - agent.Radius;
+            //var max = simTranslation.Value.Position.xz + agent.Radius;
+
+            //var minCell = gridProperties.GetCellKeyClamped(min);
+            //var maxCell = gridProperties.GetCellKeyClamped(max);
 
             int i = 0;
 
@@ -253,16 +276,18 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             {
                 ref var agentA = ref UnsafeUtility.ArrayElementAsRef<AgentSpatialData>(data.GetUnsafePtr(), i);
 
-                var agentAMin = gridProperties.GetCellKeyClamped(agentA.Position - agentA.Radius);
-                var agentAMax = gridProperties.GetCellKeyClamped(agentA.Position + agentA.Radius);
+                agentA.GetMinMax(out var agentAMinimum, out var agentAMaximum);
+                var agentAMin = gridProperties.GetCellKeyClamped(agentAMinimum);
+                var agentAMax = gridProperties.GetCellKeyClamped(agentAMaximum);
 
                 for (int j = i + 1; j < data.Length; j++)
                 {
                     ref var agentB = ref UnsafeUtility.ArrayElementAsRef<AgentSpatialData>(data.GetUnsafePtr(), j);
 
                     // TODO: These can be pre-calculated
-                    var agentBMin = gridProperties.GetCellKeyClamped(agentB.Position - agentB.Radius);
-                    var agentBMax = gridProperties.GetCellKeyClamped(agentB.Position + agentB.Radius);
+                    agentB.GetMinMax(out var agentBMinimum, out var agentBMaximum);
+                    var agentBMin = gridProperties.GetCellKeyClamped(agentBMinimum);
+                    var agentBMax = gridProperties.GetCellKeyClamped(agentBMaximum);
 
                     bool isBottomIntersection = cellIndex != gridProperties.GetCellIndex(Intersection(agentAMin, agentAMax, agentBMin, agentBMax).Item1);
 
@@ -272,35 +297,54 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                         continue;
                     }
 
-                    float2 delta = agentA.Position - agentB.Position;
-                    float distSq = math.lengthsq(delta);
+                    //float2 delta = agentA.Position - agentB.Position;
+                    //float distSq = math.lengthsq(delta);
 
-                    float minDist = (agentA.Radius + agentB.Radius) * SeparationBias;
-                    float minDistSq = minDist * minDist;
+                    //float minDist = (agentA.Radius + agentB.Radius) * SeparationBias;
+                    //float minDistSq = minDist * minDist;
 
-                    // Broad phase circle.
-                    if (distSq >= minDistSq)
-                        continue;
+                    //// Broad phase circle.
+                    //if (distSq >= minDistSq)
+                    //    continue;
 
-                    Ellipse2D A = new Ellipse2D
+
+
+                    //Ellipse2D A = new Ellipse2D
+                    //{
+                    //    position = agentA.Position,
+                    //    forward = agentA.Forward,
+                    //    radii = new float2(agentA.RightRadius, agentA.ForwardRadius) * SeparationBias,
+                    //};
+                    //Ellipse2D B = new Ellipse2D {
+                    //    position = agentB.Position,
+                    //    forward = agentB.Forward,
+                    //    radii = new float2(agentB.RightRadius, agentB.ForwardRadius) * SeparationBias,
+                    //};
+
+                    Capsule A = new Capsule
                     {
                         position = agentA.Position,
                         forward = agentA.Forward,
-                        radii = new float2(agentA.RightRadius, agentA.ForwardRadius) * SeparationBias,
+                        halfLength = agentA.Length * 0.5f,
+                        radius = agentA.Radius * SeparationBias,
                     };
-                    Ellipse2D B = new Ellipse2D {
+                    Capsule B = new Capsule
+                    {
                         position = agentB.Position,
                         forward = agentB.Forward,
-                        radii = new float2(agentB.RightRadius, agentB.ForwardRadius) * SeparationBias,
+                        halfLength = agentB.Length * 0.5f,
+                        radius = agentB.Radius * SeparationBias,
                     };
 
-                    var collision = EllipseCollision.IntersectEllipses(A, B);
+                    //var collision = EllipseCollision.IntersectEllipses(A, B);
+
+                    var collision = CapsuleCollision.CheckCollision(A, B);
 
                     // TODO: If they are right on top do stable direction.
                     //normal = math.normalize(new float2(0.73f, 0.68f)); // arbitrary stable dir
-                    if (collision.intersecting)
+                    if (collision.colliding)
                     {
-                        float2 normal = -collision.normal;
+                        float2 normal = collision.normal;
                         float penetration = collision.penetrationDepth;
 
                         float moveFracA = ComputeMoveFraction(agentA.Priority, agentB.Priority);
@@ -322,6 +366,7 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
     [BurstCompile]
     public partial struct IJobEntity_WriteHardForces : IJobEntity
     {
+        public CommandBuilder commandBuilder;
         [ReadOnly] public NativeArray<AgentSpatialData> spatialData;
 
         public void Execute(ref SimLocalTransform simLocalTransform, ref AgentComponent agent)
@@ -346,6 +391,9 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             if (correctionCount > 0)
             {
                 corectionOffset /= correctionCount;
+
+                commandBuilder.xz.Arrow(simLocalTransform.Value.Position.xz, simLocalTransform.Value.Position.xz + corectionOffset);
+
                 simLocalTransform.Value.Position += new float3(corectionOffset.x, 0, corectionOffset.y);
             }
         }

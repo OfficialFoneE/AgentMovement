@@ -15,9 +15,6 @@ public class Boostrap : MonoBehaviour
     public Material unitMaterial;
     public Mesh unitMesh;
 
-    public Material colliderMaterial;
-    public Mesh colliderMesh;
-
     public Transform targetDesintation;
 
     [Header("Properties")]
@@ -27,6 +24,19 @@ public class Boostrap : MonoBehaviour
     public float BackwardSuppression = 0.7f;
     public float MaxNeighborDistance = 6.0f;
 
+    public UnitType[] UnitTypes = new UnitType[1] { new UnitType() };
+
+    [System.Serializable]
+    public class UnitType
+    {
+        public float Scale = 1.0f;
+        public float Speed = 3.0f;
+
+        [Header("Collision")]
+        public float Length = 0.0f;
+        public float Radius = 0.5f;
+        public int AvoidancePriority = 50;
+    }
 
     private Entity prefab;
 
@@ -131,16 +141,21 @@ public class Boostrap : MonoBehaviour
 
     private void SpawnUnit()
     {
+        if (UnitTypes.Length == 0)
+        {
+            UnityEngine.Debug.LogError("Please add a unit type!", this);
+            return;
+        }
+
+        var unitType = UnitTypes[UnityEngine.Random.Range(0, UnitTypes.Length)];
+
         var unit = entityManager.Instantiate(prefab);
 
-        var position = new float3(256, 0, 256);//new float3(UnityEngine.Random.Range(10, 11), 0, UnityEngine.Random.Range(-0.1f, 0.1f));
-
-        float size = UnityEngine.Random.Range(1, 4.0f);
-        float sizePercent = (size - 1) / 3.0f;
+        var position = new float3(256 + UnityEngine.Random.Range(-0.01f, 0.01f), 0, 256 + UnityEngine.Random.Range(-0.01f, 0.01f));//new float3(UnityEngine.Random.Range(10, 11), 0, UnityEngine.Random.Range(-0.1f, 0.1f));
 
         var localTransform = new LocalTransform
         {
-            Scale = size,
+            Scale = unitType.Scale,
             Position = position,
             Rotation = quaternion.identity,
         };
@@ -151,25 +166,25 @@ public class Boostrap : MonoBehaviour
 
         entityManager.SetComponentData(unit, new MaxSpeed
         {
-            Value = math.lerp(3f, 1f, sizePercent)
-        });
-
-        entityManager.SetComponentData(unit, new CollisionEllipse
-        {
-            Radii = new float2(size, size * 1.5f) * 0.5f,
+            Value = unitType.Speed,
         });
 
         entityManager.SetComponentData(unit, new AgentComponent
         {
-            ForwardRadius = size * 1.5f,
-            RightRadius = size,
-            AvoidancePriority = 50,
+            Length = unitType.Length,
+            Radius = unitType.Radius,
+            AvoidancePriority = unitType.AvoidancePriority,
         });
 
-        entityManager.SetComponentData(unit, new CollisionPriority
-        {
-            Value = math.lerp(5, 0.5f, sizePercent)
-        });
+        //entityManager.SetComponentData(unit, new CollisionEllipse
+        //{
+        //    Radii = new float2(size, size * 1.5f) * 0.5f,
+        //});
+
+        //entityManager.SetComponentData(unit, new CollisionPriority
+        //{
+        //    Value = math.lerp(5, 0.5f, sizePercent)
+        //});
     }
 
     public void OnValidate()

@@ -257,18 +257,32 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe79b5ae7e04548438dfe427e6e4c561, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  DrawRadiuses: 1
-  DrawGrid: 1
+  DrawRadiuses: 0
+  DrawGrid: 0
   unitMaterial: {fileID: 2100000, guid: ec5ec4a618961cb41ab1dc807d499d63, type: 2}
   unitMesh: {fileID: 5923874233022535320, guid: f9ee504498bd09c46a8c441a8acc34e8, type: 3}
-  colliderMaterial: {fileID: 2100000, guid: 1909d723034db774586e226da067c3d7, type: 2}
-  colliderMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   targetDesintation: {fileID: 788662759}
   SeparationStrength: 2
   CrowdDampingFactor: 0.8
   CrowdNeighborThreshold: 4
   BackwardSuppression: 0.7
   MaxNeighborDistance: 6
+  UnitTypes:
+  - Scale: 1
+    Speed: 3
+    Length: 0
+    Radius: 0.5
+    AvoidancePriority: 50
+  - Scale: 2
+    Speed: 3
+    Length: 2
+    Radius: 1
+    AvoidancePriority: 50
+  - Scale: 5
+    Speed: 1
+    Length: 3
+    Radius: 3
+    AvoidancePriority: 50
 --- !u!4 &307754030
 Transform:
   m_ObjectHideFlags: 0
@@ -632,8 +646,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ellipseA:
     position:
+      x: 0.23
+      y: 0.01
+    forward:
       x: 0
-      y: 0
+      y: 1
     rotation: 0.68
     halfLength: 0.33
     radius: 0.3
@@ -641,9 +658,12 @@ MonoBehaviour:
     position:
       x: -0.46
       y: 0
-    rotation: -2.37
-    halfLength: 0.81
-    radius: 0.21
+    forward:
+      x: 0
+      y: 1
+    rotation: -2.2
+    halfLength: 0.24
+    radius: 0.3
   ellipseColorA: {r: 0, g: 1, b: 0, a: 1}
   ellipseColorB: {r: 0, g: 1, b: 1, a: 1}
   collisionColor: {r: 1, g: 0, b: 0, a: 1}
@@ -656,7 +676,7 @@ Transform:
   m_GameObject: {fileID: 1112428694}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.042, y: 0, z: -0.031}
+  m_LocalPosition: {x: 0.071, y: 0, z: -0.066}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

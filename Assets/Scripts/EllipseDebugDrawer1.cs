@@ -4,7 +4,7 @@ using static Unity.Mathematics.math;
 using UnityEditor.Build.Pipeline;
 using Drawing;
 
-public class EllipseDebugDrawer2 : MonoBehaviour
+public class EllipseDebugDrawer2 : Drawing.MonoBehaviourGizmos
 {
     public Capsule ellipseA;
     public Capsule ellipseB;
@@ -18,15 +18,15 @@ public class EllipseDebugDrawer2 : MonoBehaviour
 
     void OnDrawGizmos()
     {
-        ellipseA.Draw();
-        ellipseB.Draw();
+        //ellipseA.Draw();
+        //ellipseB.Draw();
 
-        var results = CapsuleCollision.CheckCollision(ellipseA, ellipseB);
+        //var results = CapsuleCollision.CheckCollision(ellipseA, ellipseB);
 
-        if (results.colliding)
-        {
-            Drawing.Draw.xz.Line(ellipseA.position, ellipseA.position + results.normal * results.penetrationDepth);
-        }
+        //if (results.colliding)
+        //{
+        //    Drawing.Draw.xz.Line(ellipseA.position, ellipseA.position + results.normal * results.penetrationDepth);
+        //}
 
         //ellipseA.forward = normalize(ellipseA.forward);
         //ellipseB.forward = normalize(ellipseB.forward);
@@ -47,6 +47,19 @@ public class EllipseDebugDrawer2 : MonoBehaviour
 
         //    Gizmos.DrawSphere(ToFloat3(contactPoint), 0.05f);
         //}
+    }
+
+    public override void DrawGizmos()
+    {
+        ellipseA.Draw();
+        ellipseB.Draw();
+
+        var results = CapsuleCollision.CheckCollision(ellipseA, ellipseB);
+
+        if (results.colliding)
+        {
+            Drawing.Draw.xz.Line(ellipseA.position, ellipseA.position + results.normal * results.penetrationDepth);
+        }
     }
 
     //float3 ToFloat3(float2 v) => new float3(v.x, 0, v.y);
@@ -88,13 +101,15 @@ public class EllipseDebugDrawer2 : MonoBehaviour
 public struct Capsule
 {
     public float2 position;  // Center position
+    public float2 forward;  // Must be normalised!
     public float rotation;    // Rotation in radians
     public float halfLength;  // Half the length of the capsule's line segment
     public float radius;      // Radius around the line segment
 
-    public Capsule(float2 pos, float rot, float halfLen, float rad)
+    public Capsule(float2 pos, float2 forward, float rot, float halfLen, float rad)
     {
         position = pos;
+        this.forward = forward;
         rotation = rot;
         halfLength = halfLen;
         radius = rad;
@@ -103,12 +118,8 @@ public struct Capsule
     // Get the two end points of the capsule's central line segment
     public void GetEndPoints(out float2 p1, out float2 p2)
     {
-        float cos = (float)math.cos(rotation);
-        float sin = (float)math.sin(rotation);
-        float2 dir = new float2(cos, sin);
-
-        p1 = position - dir * halfLength;
-        p2 = position + dir * halfLength;
+        p1 = position - forward * halfLength;
+        p2 = position + forward * halfLength;
     }
 
     public void Draw()
@@ -208,10 +219,10 @@ public class CapsuleCollision
     // Calculate how close a point is to the end caps (0 = center, 1 = at end)
     private static float GetEndCapFactor(float2 point, Capsule capsule)
     {
-        capsule.GetEndPoints(out float2 p1, out float2 p2);
+        //capsule.GetEndPoints(out float2 p1, out float2 p2);
 
         // Project point onto the capsule's axis
-        float2 axis = math.normalize(p2 - p1);
+        float2 axis = capsule.forward;
         float2 toPoint = point - capsule.position;
         float projection = math.abs(math.dot(toPoint, axis));
 
@@ -244,7 +255,7 @@ public class CapsuleCollision
         if (a <= 1e-6f)
         {
             s = 0.0f;
-            t = Clamp01(f / e);
+            t = saturate(f / e);
         }
         else
         {
@@ -252,7 +263,7 @@ public class CapsuleCollision
             if (e <= 1e-6f)
             {
                 t = 0.0f;
-                s = Clamp01(-c / a);
+                s = saturate(-c / a);
             }
             else
             {
@@ -260,7 +271,7 @@ public class CapsuleCollision
                 float denom = a * e - b * b;
 
                 if (denom != 0.0f)
-                    s = Clamp01((b * f - c * e) / denom);
+                    s = saturate((b * f - c * e) / denom);
                 else
                     s = 0.0f;
 
@@ -269,12 +280,12 @@ public class CapsuleCollision
                 if (t < 0.0f)
                 {
                     t = 0.0f;
-                    s = Clamp01(-c / a);
+                    s = saturate(-c / a);
                 }
                 else if (t > 1.0f)
                 {
                     t = 1.0f;
-                    s = Clamp01((b - c) / a);
+                    s = saturate((b - c) / a);
                 }
             }
         }
