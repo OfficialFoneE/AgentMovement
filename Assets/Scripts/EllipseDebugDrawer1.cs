@@ -185,7 +185,15 @@ public class CapsuleCollision
         }
 
         // Apply smoothing to prevent flat-edge clustering
+        float2 originalNormal = result.normal;
         result.normal = SmoothNormal(result.normal, closestA, closestB, capsule1, capsule2);
+
+        // Recalculate penetration depth along the new normal if it changed
+        if (math.abs(result.normal.x - originalNormal.x) > 1e-6f ||
+            math.abs(result.normal.y - originalNormal.y) > 1e-6f)
+        {
+            result.penetrationDepth = RecalculatePenetrationDepth(capsule1, capsule2, result.normal);
+        }
 
         return result;
     }
@@ -214,6 +222,35 @@ public class CapsuleCollision
         }
 
         return normal;
+    }
+
+    // Recalculate penetration depth along a given normal direction
+    private static float RecalculatePenetrationDepth(Capsule cap1, Capsule cap2, float2 normal)
+    {
+        // Project both capsules onto the normal axis and find overlap
+        ProjectCapsuleOntoAxis(cap1, normal, out float min1, out float max1);
+        ProjectCapsuleOntoAxis(cap2, normal, out float min2, out float max2);
+
+        // Calculate overlap along the axis
+        float overlap1 = max1 - min2; // cap1's max overlaps cap2's min
+        float overlap2 = max2 - min1; // cap2's max overlaps cap1's min
+
+        // Return the smaller overlap (actual penetration)
+        return math.min(overlap1, overlap2);
+    }
+
+    // Project a capsule onto an axis and get its min/max extents
+    private static void ProjectCapsuleOntoAxis(Capsule capsule, float2 axis, out float min, out float max)
+    {
+        capsule.GetEndPoints(out float2 p1, out float2 p2);
+
+        // Project both endpoints onto the axis
+        float proj1 = math.dot(p1, axis);
+        float proj2 = math.dot(p2, axis);
+
+        // The capsule extends by its radius in both directions
+        min = math.min(proj1, proj2) - capsule.radius;
+        max = math.max(proj1, proj2) + capsule.radius;
     }
 
     // Calculate how close a point is to the end caps (0 = center, 1 = at end)
