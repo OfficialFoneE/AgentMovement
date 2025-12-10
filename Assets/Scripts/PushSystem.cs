@@ -10,14 +10,13 @@ using Unity.Transforms;
 public struct AgentComponent : IComponentData
 {
     public float Length;      // Semi-axis along forward
-    public float Radius;        // Semi-axis perpendicular to forward
+    public float BaseRadius;        // Semi-axis perpendicular to forward
+
+    public float CrowdingFactor;
+    public float Radius => BaseRadius * CrowdingFactor;
 
     /// 0 = highest priority (moves least), 99 = lowest priority (moves most)
     public int AvoidancePriority;
-
-    /// The last updates correction count.
-    // If we are being influences by too many neighbors then we expand our radius.
-    public int CorrectionCount;
 
     public FixedList128Bytes<int> Indicies;
 
@@ -39,6 +38,9 @@ public struct AgentSpatialData : IComponentData
     public float2 CorectionOffset;
     public int CorrectionCount;
     public float Priority;
+
+    public float PenetrationSum;
+    public float Padding;
 
     public void GetMinMax(out float2 min, out float2 max)
     {
@@ -125,6 +127,8 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             {
                 spatialData = spatialGrid.cellData,
                 commandBuilder = builder,
+                CrowdingFactorChangeSpeed = 1,
+                Iterations = Iterations,
             };
 
             state.Dependency = resetJob.Schedule(state.Dependency);
@@ -297,6 +301,7 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                         continue;
                     }
 
+                    // TODO: Do broad phase check!
                     //float2 delta = agentA.Position - agentB.Position;
                     //float distSq = math.lengthsq(delta);
 
@@ -306,20 +311,6 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                     //// Broad phase circle.
                     //if (distSq >= minDistSq)
                     //    continue;
-
-
-
-                    //Ellipse2D A = new Ellipse2D
-                    //{
-                    //    position = agentA.Position,
-                    //    forward = agentA.Forward,
-                    //    radii = new float2(agentA.RightRadius, agentA.ForwardRadius) * SeparationBias,
-                    //};
-                    //Ellipse2D B = new Ellipse2D {
-                    //    position = agentB.Position,
-                    //    forward = agentB.Forward,
-                    //    radii = new float2(agentB.RightRadius, agentB.ForwardRadius) * SeparationBias,
-                    //};
 
                     Capsule A = new Capsule
                     {
@@ -336,8 +327,6 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                         radius = agentB.Radius * SeparationBias,
                     };
 
-                    //var collision = EllipseCollision.IntersectEllipses(A, B);
-
                     var collision = CapsuleCollision.CheckCollision(A, B);
 
                     // TODO: If they are right on top do stable direction.
@@ -352,9 +341,11 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                         float2 corrA = normal * (penetration * moveFracA);
                         float2 corrB = -normal * (penetration * moveFracB);
 
+                        agentA.PenetrationSum += penetration;
                         agentA.CorectionOffset += corrA;
                         agentA.CorrectionCount += 1;
 
+                        agentB.PenetrationSum += penetration;
                         agentB.CorectionOffset += corrB;
                         agentB.CorrectionCount += 1;
                     }
@@ -369,10 +360,15 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
         public CommandBuilder commandBuilder;
         [ReadOnly] public NativeArray<AgentSpatialData> spatialData;
 
+        // The amount the colliders can expand per tick.
+        public float CrowdingFactorChangeSpeed;
+        public float Iterations;
+
         public void Execute(ref SimLocalTransform simLocalTransform, ref AgentComponent agent)
         {
             float2 corectionOffset = 0;
             int correctionCount = 0;
+            float penetrationSum = 0;
 
             for (int i = 0; i < agent.Indicies.Length; i++)
             {
@@ -382,20 +378,29 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
 
                 corectionOffset += data.CorectionOffset;
                 correctionCount += data.CorrectionCount;
+
+                penetrationSum += data.PenetrationSum;
             }
 
             agent.Indicies.Clear();
 
-            agent.CorrectionCount = correctionCount;
+            var pastCrowdingScore = agent.CrowdingFactor;
 
             if (correctionCount > 0)
             {
-                corectionOffset /= correctionCount;
+                // Calculate relative penetration (compared to capsule size)
+                float capsuleSize = agent.Length + agent.Radius * 2;
+                float relativePenetration = penetrationSum / capsuleSize;
 
-                commandBuilder.xz.Arrow(simLocalTransform.Value.Position.xz, simLocalTransform.Value.Position.xz + corectionOffset);
+                // NOTE: We can also scale this by the number of collisions. This way, if we only collide twice, we will not scale.
+                agent.CrowdingFactor = math.lerp(1, 1.4f, math.saturate(relativePenetration));
+
+                corectionOffset /= correctionCount;
 
                 simLocalTransform.Value.Position += new float3(corectionOffset.x, 0, corectionOffset.y);
             }
+
+            agent.CrowdingFactor = math.lerp(pastCrowdingScore, agent.CrowdingFactor, CrowdingFactorChangeSpeed / Iterations);
         }
     }
 

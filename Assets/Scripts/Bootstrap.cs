@@ -11,6 +11,7 @@ public class Boostrap : MonoBehaviour
 
     public bool DrawRadiuses = true;
     public bool DrawGrid = true;
+    public bool RandomRotations = true;
 
     public Material unitMaterial;
     public Mesh unitMesh;
@@ -160,6 +161,11 @@ public class Boostrap : MonoBehaviour
             Rotation = quaternion.identity,
         };
 
+        if (RandomRotations)
+        {
+            localTransform.Rotation = quaternion.RotateY(UnityEngine.Random.Range(-math.PI2, math.PI2));
+        }
+
         entityManager.SetComponentData(unit, localTransform);
         entityManager.SetComponentData(unit, new SimLocalTransform { Value = localTransform });
         entityManager.SetComponentData(unit, new PastSimLocalTransform { Value = localTransform });
@@ -172,7 +178,8 @@ public class Boostrap : MonoBehaviour
         entityManager.SetComponentData(unit, new AgentComponent
         {
             Length = unitType.Length,
-            Radius = unitType.Radius,
+            BaseRadius = unitType.Radius,
+            CrowdingFactor = 1,
             AvoidancePriority = unitType.AvoidancePriority,
         });
 

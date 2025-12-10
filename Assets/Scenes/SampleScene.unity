@@ -257,7 +257,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe79b5ae7e04548438dfe427e6e4c561, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  DrawRadiuses: 0
+  DrawRadiuses: 1
   DrawGrid: 0
   unitMaterial: {fileID: 2100000, guid: ec5ec4a618961cb41ab1dc807d499d63, type: 2}
   unitMesh: {fileID: 5923874233022535320, guid: f9ee504498bd09c46a8c441a8acc34e8, type: 3}
