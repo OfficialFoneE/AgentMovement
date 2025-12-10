@@ -1,8 +1,5 @@
-using UnityEngine;
 using Unity.Mathematics;
-using static Unity.Mathematics.math;
-using UnityEditor.Build.Pipeline;
-using Drawing;
+using UnityEngine;
 
 public class EllipseDebugDrawer2 : Drawing.MonoBehaviourGizmos
 {
@@ -382,7 +379,7 @@ public class CapsuleCollision
         if (a <= 1e-6f)
         {
             s = 0.0f;
-            t = saturate(f / e);
+            t = math.saturate(f / e);
         }
         else
         {
@@ -390,7 +387,7 @@ public class CapsuleCollision
             if (e <= 1e-6f)
             {
                 t = 0.0f;
-                s = saturate(-c / a);
+                s = math.saturate(-c / a);
             }
             else
             {
@@ -398,7 +395,7 @@ public class CapsuleCollision
                 float denom = a * e - b * b;
 
                 if (denom != 0.0f)
-                    s = saturate((b * f - c * e) / denom);
+                    s = math.saturate((b * f - c * e) / denom);
                 else
                     s = 0.0f;
 
@@ -407,24 +404,17 @@ public class CapsuleCollision
                 if (t < 0.0f)
                 {
                     t = 0.0f;
-                    s = saturate(-c / a);
+                    s = math.saturate(-c / a);
                 }
                 else if (t > 1.0f)
                 {
                     t = 1.0f;
-                    s = saturate((b - c) / a);
+                    s = math.saturate((b - c) / a);
                 }
             }
         }
 
         closestA = a1 + d1 * s;
         closestB = b1 + d2 * t;
-    }
-
-    private static float Clamp01(float value)
-    {
-        if (value < 0.0f) return 0.0f;
-        if (value > 1.0f) return 1.0f;
-        return value;
     }
 }

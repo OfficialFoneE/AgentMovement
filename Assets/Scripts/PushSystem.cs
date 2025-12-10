@@ -56,11 +56,11 @@ public struct AgentSpatialData : IComponentData
 [UpdateAfter(typeof(EllipticalSeparationSystem))]
 public partial struct NavAgentOverlapResolutionSystem : ISystem
 {
-    const int Iterations = 10;    // Number of positional solver iterations
+    const int Iterations = 8;    // Number of positional solver iterations
     const float SeparationBias = 1.1f;//1.05f;//1.1f;//1.05f;
 
     private readonly static int2 mapSize = new int2(512, 512) * 4;
-    private readonly static int cellSize = 16;
+    private readonly static int cellSize = 8;
 
     private SpatialGrid<AgentSpatialData> spatialGrid;
 
@@ -120,13 +120,9 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                 SeparationBias = SeparationBias,
             };
 
-            var builder = DrawingManager.GetBuilder();
-            builder.Preallocate(10000);
-
             var IJobEntity_WriteHardForces = new IJobEntity_WriteHardForces()
             {
                 spatialData = spatialGrid.cellData,
-                commandBuilder = builder,
                 CrowdingFactorChangeSpeed = 1,
                 Iterations = Iterations,
             };
@@ -137,7 +133,6 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             state.Dependency = PopulateHardForceGridData.ScheduleParallel(state.Dependency);
             state.Dependency = ProcessHardForces.Schedule(spatialGrid.activeCells, 1, state.Dependency);
             state.Dependency = IJobEntity_WriteHardForces.ScheduleParallel(state.Dependency);
-            builder.DisposeAfter(state.Dependency);
         }
 
         state.Dependency.Complete();
@@ -357,7 +352,6 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
     [BurstCompile]
     public partial struct IJobEntity_WriteHardForces : IJobEntity
     {
-        public CommandBuilder commandBuilder;
         [ReadOnly] public NativeArray<AgentSpatialData> spatialData;
 
         // The amount the colliders can expand per tick.
@@ -389,9 +383,11 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             if (correctionCount > 0)
             {
                 // Calculate relative penetration (compared to capsule size)
+                // Should change this from penetartion to area ratios.
                 float capsuleSize = agent.Length + agent.Radius * 2;
                 float relativePenetration = penetrationSum / capsuleSize;
 
+                // TODO: Make this a value on the agent.
                 // NOTE: We can also scale this by the number of collisions. This way, if we only collide twice, we will not scale.
                 agent.CrowdingFactor = math.lerp(1, 1.4f, math.saturate(relativePenetration));
 
