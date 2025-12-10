@@ -293,7 +293,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 677913876}
-  - component: {fileID: 677913875}
   m_Layer: 0
   m_Name: GameObject
   m_TagString: Untagged
@@ -301,41 +300,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &677913875
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 677913874}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8dcfd4942c4374f4385f0d9951351b06, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  ellipseA:
-    position:
-      x: 0
-      y: 0
-    radii:
-      x: 0.5
-      y: 0.5
-    forward:
-      x: 0.09974518
-      y: 0.99501306
-  ellipseB:
-    position:
-      x: 0
-      y: 0
-    radii:
-      x: 0.5
-      y: 0.5
-    forward:
-      x: -0.92691046
-      y: -0.3752827
-  ellipseColorA: {r: 0, g: 1, b: 0, a: 1}
-  ellipseColorB: {r: 0, g: 1, b: 1, a: 1}
-  collisionColor: {r: 1, g: 0, b: 0, a: 1}
 --- !u!4 &677913876
 Transform:
   m_ObjectHideFlags: 0
@@ -637,6 +601,67 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+--- !u!1 &1112428694
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1112428696}
+  - component: {fileID: 1112428695}
+  m_Layer: 0
+  m_Name: GameObject (1)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1112428695
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1112428694}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5c54bd58232d85b4182a104a9c32e14a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ellipseA:
+    position:
+      x: 0
+      y: 0
+    rotation: 0.68
+    halfLength: 0.33
+    radius: 0.3
+  ellipseB:
+    position:
+      x: -0.46
+      y: 0
+    rotation: -2.37
+    halfLength: 0.81
+    radius: 0.21
+  ellipseColorA: {r: 0, g: 1, b: 0, a: 1}
+  ellipseColorB: {r: 0, g: 1, b: 1, a: 1}
+  collisionColor: {r: 1, g: 0, b: 0, a: 1}
+--- !u!4 &1112428696
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1112428694}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.042, y: 0, z: -0.031}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -647,3 +672,4 @@ SceneRoots:
   - {fileID: 307754030}
   - {fileID: 246812469}
   - {fileID: 677913876}
+  - {fileID: 1112428696}

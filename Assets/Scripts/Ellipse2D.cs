@@ -18,59 +18,92 @@ public struct EllipseCollisionResult
 
 public static class EllipseCollision
 {
-    public static EllipseCollisionResult IntersectEllipses(in Ellipse2D A, in Ellipse2D B)
+    public static EllipseCollisionResult IntersectEllipses(
+           in Ellipse2D A,
+           in Ellipse2D B)
     {
         EllipseCollisionResult result = default;
 
         float2 delta = B.position - A.position;
         float distSq = lengthsq(delta);
 
-        // If same position -> fallback case
-        if (distSq < 1e-8f)
+        // Handle same position
+        if (distSq < 1e-10f)
         {
+            float2 fallback = normalize(A.forward);
+            if (!all(isfinite(fallback))) fallback = float2(1, 0);
             result.intersecting = true;
-
-            // Pick a stable fallback direction:
-            float2 normal = math.normalize(new float2(0.73f, 0.68f));//normalize(A.forward);
-            if (any(isnan(normal)) || all(normal == float2(0)))
-                normal = float2(1, 0);
-
-            float2 avgRadii = (A.radii + B.radii) * 0.5f;
-            float penetrationMag = max(avgRadii.x, avgRadii.y);
-
-            result.normal = normal;
-            result.penetrationDepth = penetrationMag;
+            result.normal = fallback;
+            result.penetrationDepth = max(cmax(A.radii), cmax(B.radii));
             return result;
         }
 
-        float2 n = normalize(delta);
+        float2 initialNormal = normalize(delta);
 
-        // Generate basis for each ellipse from its forward vector
-        float2 A_right = float2(-A.forward.y, A.forward.x);
-        float2 B_right = float2(-B.forward.y, B.forward.x);
-
-        // Transform direction into ellipse local axis
-        float2 nA = float2(dot(n, A.forward), dot(n, A_right));
-        float2 nB = float2(dot(n, B.forward), dot(n, B_right));
-
-        // Effective "radius" in the direction of n (ellipse support function)
-        float rA = 1f / sqrt((nA.x * nA.x) / (A.radii.x * A.radii.x) +
-                             (nA.y * nA.y) / (A.radii.y * A.radii.y));
-
-        float rB = 1f / sqrt((nB.x * nB.x) / (B.radii.x * B.radii.x) +
-                             (nB.y * nB.y) / (B.radii.y * B.radii.y));
-
+        // Approx penetration using support function (ellipse -> circle projection method)
+        float rA = ProjectRadius(A, initialNormal);
+        float rB = ProjectRadius(B, -initialNormal);
         float centerDist = sqrt(distSq);
         float penetration = rA + rB - centerDist;
 
-        if (penetration > 0f)
+        if (penetration <= 0f)
         {
-            result.intersecting = true;
-            result.normal = n; // direction from A -> B
-            result.penetrationDepth = penetration;
+            result.intersecting = false;
+            return result;
         }
 
+        // -------------------------
+        // Refinement step
+        // -------------------------
+        // Push the normal slightly toward the true collision direction
+        float2 refinedNormal = RefineNormal(A, B, initialNormal);
+
+        // Recalculate penetration depth using refined normal
+        rA = ProjectRadius(A, refinedNormal);
+        rB = ProjectRadius(B, -refinedNormal);
+        penetration = rA + rB - centerDist;
+        penetration = max(penetration, 0f); // clamp for
+        refinedNormal = normalize(refinedNormal);
+
+        result.intersecting = true;
+        result.normal = refinedNormal;
+        result.penetrationDepth = penetration;
         return result;
+    }
+
+    // Projection of ellipse radius along direction n
+    private static float ProjectRadius(in Ellipse2D e, float2 n)
+    {
+        float2 f = normalize(e.forward);
+        float2 r = new float2(-f.y, f.x);
+
+        float nx = dot(n, f);
+        float ny = dot(n, r);
+
+        float rx = e.radii.x;
+        float ry = e.radii.y;
+
+        float denom = sqrt((nx * nx) / (rx * rx) + (ny * ny) / (ry * ry));
+        if (denom < 1e-9f) return 0f;
+        return 1f / denom;
+    }
+
+    // Normal correction -> 1 or 2 iterations is enough
+    private static float2 RefineNormal(in Ellipse2D A, in Ellipse2D B, float2 n)
+    {
+        for (int i = 0; i < 2; i++) // keeping it ultra cheap
+        {
+            float rA = ProjectRadius(A, n);
+            float rB = ProjectRadius(B, -n);
+
+            float2 pA = A.position + n * rA;
+            float2 pB = B.position - n * rB;
+
+            float2 correction = normalize(pB - pA);
+            if (all(isfinite(correction)))
+                n = correction;
+        }
+        return normalize(n);
     }
 }
 
