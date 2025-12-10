@@ -38,10 +38,9 @@ public partial struct DrawCollidersSystem : ISystem
         foreach (var (ellipse, simTransform) in SystemAPI.Query<RefRO<AgentComponent>, RefRO<SimLocalTransform>>())
         {
             var t = simTransform.ValueRO.Value;
-            //builder.PushMatrix(float4x4.TRS(t.Position, t.Rotation, new float3(ellipse.ValueRO.Radius, 1, ellipse.ValueRO.Radius)));
-            builder.xz.Circle(t.Position.xz, ellipse.ValueRO.BaseRadius);
-            builder.xz.Circle(t.Position.xz, ellipse.ValueRO.Radius);
-            //builder.PopMatrix();
+            builder.PushMatrix(float4x4.TRS(t.Position, t.Rotation, new float3(ellipse.ValueRO.RightRadius, 1, ellipse.ValueRO.ForwardRadius)));
+            builder.xz.Circle(float2.zero, 1);
+            builder.PopMatrix();
         }
 
         builder.Dispose();

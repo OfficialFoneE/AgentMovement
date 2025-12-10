@@ -108,7 +108,11 @@ public partial struct EllipticalSeparationSystem : ISystem
             pastSimTransform.ValueRW.Value = simTransform.ValueRO.Value;
         }
 
-        //return;
+        if(true)
+        {
+            builder.DiscardAndDispose();
+            return;
+        }
 
         foreach (var (desiredVelocity, simLocalTransform, maxSpeed) in SystemAPI.Query<RefRW<DesiredVelocity>, RefRO<SimLocalTransform>, RefRO<MaxSpeed>>())
         {

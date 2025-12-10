@@ -8,9 +8,10 @@ using Unity.Transforms;
 
 public struct AgentComponent : IComponentData
 {
-    public float BaseRadius;
+    public float ForwardRadius;      // Semi-axis along forward
+    public float RightRadius;        // Semi-axis perpendicular to forward
 
-    public float Radius => BaseRadius; // BaseRadius * math.lerp(1.0f, 1.25f, math.smoothstep(3, 6, CorrectionCount));
+    public float Radius => math.max(ForwardRadius, RightRadius); // BaseRadius * math.lerp(1.0f, 1.25f, math.smoothstep(3, 6, CorrectionCount));
 
     /// 0 = highest priority (moves least), 99 = lowest priority (moves most)
     public int AvoidancePriority;
@@ -25,11 +26,14 @@ public struct AgentComponent : IComponentData
 public struct AgentSpatialData : IComponentData
 {
     public float2 Position;
-    public float Radius;
-    public float Priority;
+    public float2 Forward;
+    public float ForwardRadius;      // Semi-axis along forward
+    public float RightRadius;        // Semi-axis perpendicular to forward
     public float2 CorectionOffset;
     public int CorrectionCount;
-    public int Padding;
+    public float Priority;
+
+    public float Radius => math.max(ForwardRadius, RightRadius);
 }
 
 [BurstCompile]
@@ -171,11 +175,12 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
             var agentSpatialData = new AgentSpatialData
             {
                 Position = simTranslation.Value.Position.xz,
-                Radius = agent.Radius,
+                Forward = math.normalize(simTranslation.Value.Forward().xz),
+                ForwardRadius = agent.ForwardRadius,
+                RightRadius = agent.RightRadius,
                 Priority = 50,
                 CorectionOffset = 0,
                 CorrectionCount = 0,
-                Padding = 0,
             };
 
             var min = simTranslation.Value.Position.xz - agent.Radius;
@@ -273,29 +278,42 @@ public partial struct NavAgentOverlapResolutionSystem : ISystem
                     float minDist = (agentA.Radius + agentB.Radius) * SeparationBias;
                     float minDistSq = minDist * minDist;
 
+                    // Broad phase circle.
                     if (distSq >= minDistSq)
                         continue;
 
-                    float dist = math.sqrt(distSq);
+                    Ellipse2D A = new Ellipse2D
+                    {
+                        position = agentA.Position,
+                        forward = agentA.Forward,
+                        radii = new float2(agentA.RightRadius, agentA.ForwardRadius) * SeparationBias,
+                    };
+                    Ellipse2D B = new Ellipse2D {
+                        position = agentB.Position,
+                        forward = agentB.Forward,
+                        radii = new float2(agentB.RightRadius, agentB.ForwardRadius) * SeparationBias,
+                    };
 
-                    float2 normal;
-                    if (dist > 1e-4f)
-                        normal = delta / dist;
-                    else // TODO: Replace with something already normalized!!!! This should become a math.select!
-                        normal = math.normalize(new float2(0.73f, 0.68f)); // arbitrary stable dir
+                    var collision = EllipseCollision.IntersectEllipses(A, B);
 
-                    float penetration = minDist - dist;
+                    // TODO: If they are right on top do stable direction.
+                    //normal = math.normalize(new float2(0.73f, 0.68f)); // arbitrary stable dir
+                    if (collision.intersecting)
+                    {
+                        float2 normal = -collision.normal;
+                        float penetration = collision.penetrationDepth;
 
-                    float moveFracA = ComputeMoveFraction(agentA.Priority, agentB.Priority);
-                    float moveFracB = ComputeMoveFraction(agentB.Priority, agentA.Priority);
-                    float2 corrA = normal * (penetration * moveFracA);
-                    float2 corrB = -normal * (penetration * moveFracB);
+                        float moveFracA = ComputeMoveFraction(agentA.Priority, agentB.Priority);
+                        float moveFracB = ComputeMoveFraction(agentB.Priority, agentA.Priority);
+                        float2 corrA = normal * (penetration * moveFracA);
+                        float2 corrB = -normal * (penetration * moveFracB);
 
-                    agentA.CorectionOffset += corrA;
-                    agentA.CorrectionCount += 1;
+                        agentA.CorectionOffset += corrA;
+                        agentA.CorrectionCount += 1;
 
-                    agentB.CorectionOffset += corrB;
-                    agentB.CorrectionCount += 1;
+                        agentB.CorectionOffset += corrB;
+                        agentB.CorrectionCount += 1;
+                    }
                 }
             }
         }

@@ -156,12 +156,13 @@ public class Boostrap : MonoBehaviour
 
         entityManager.SetComponentData(unit, new CollisionEllipse
         {
-            Radii = new float2(size, size /** 1.5f*/) * 0.5f,
+            Radii = new float2(size, size * 1.5f) * 0.5f,
         });
 
         entityManager.SetComponentData(unit, new AgentComponent
         {
-            BaseRadius = size/* * 0.5f*/,
+            ForwardRadius = size * 1.5f,
+            RightRadius = size,
             AvoidancePriority = 50,
         });
 
