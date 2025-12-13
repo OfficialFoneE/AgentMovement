@@ -29,6 +29,12 @@ public struct MaxSpeedComponent : IComponentData
     public float Value;
 }
 
+public struct DesiredVelocity : IComponentData
+{
+    /// <summary>Desired velocity in XZ plane for this frame.</summary>
+    public float2 Value;
+}
+
 public struct DestinationComponent : IComponentData
 {
     public float2 Value;

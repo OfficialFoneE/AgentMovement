@@ -16,15 +16,6 @@ public class Boostrap : MonoBehaviour
     public Material unitMaterial;
     public Mesh unitMesh;
 
-    public Transform targetDesintation;
-
-    [Header("Properties")]
-    public float SeparationStrength = 2.0f;
-    public float CrowdDampingFactor = 0.8f;
-    public int CrowdNeighborThreshold = 4;
-    public float BackwardSuppression = 0.7f;
-    public float MaxNeighborDistance = 6.0f;
-
     public UnitType[] UnitTypes = new UnitType[1] { new UnitType() };
 
     [System.Serializable]
@@ -43,8 +34,6 @@ public class Boostrap : MonoBehaviour
 
     private EntityManager entityManager => World.DefaultGameObjectInjectionWorld.EntityManager;
 
-    private Entity seperationSingleton;
-
     private void Awake()
     {
         Instance = this;
@@ -59,15 +48,6 @@ public class Boostrap : MonoBehaviour
         {
             SpawnUnit();
         }
-
-        seperationSingleton = entityManager.CreateSingleton(new EllipseSeparationParams
-        {
-            SeparationStrength = 2.0f,
-            CrowdDampingFactor = 0.8f,
-            CrowdNeighborThreshold = 4,
-            BackwardSuppression = 0.7f,
-            MaxNeighborDistance = 6.0f,
-        });
 
         var fixedStepSimulationSystemGroup = World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<FixedStepSimulationSystemGroup>();
         fixedStepSimulationSystemGroup.Timestep = 0.1f; // 10 Hz
@@ -89,8 +69,6 @@ public class Boostrap : MonoBehaviour
             ComponentType.ReadOnly<PastSimLocalTransform>(),
             ComponentType.ReadOnly<SimLocalTransform>(),
             ComponentType.ReadWrite<MaxSpeedComponent>(),
-            ComponentType.ReadWrite<CollisionEllipse>(), 
-            ComponentType.ReadWrite<CollisionPriority>(),
             ComponentType.ReadWrite<DesiredVelocity>(),
             ComponentType.ReadWrite<AgentComponent>(),
             ComponentType.ReadWrite<DestinationComponent>());
@@ -106,16 +84,6 @@ public class Boostrap : MonoBehaviour
         entityManager.SetComponentData(prefab, new SimLocalTransform { Value = localTransform });
         entityManager.SetComponentData(prefab, new PastSimLocalTransform { Value = localTransform });
 
-        entityManager.SetComponentData(prefab, new CollisionEllipse
-        {
-            Radii = new float2(1f, 1f),
-        });
-
-        entityManager.SetComponentData(prefab, new CollisionPriority
-        {
-            Value = 1,
-        });
-
         var renderMeshDescription = new RenderMeshDescription
         {
             FilterSettings = Unity.Entities.Graphics.RenderFilterSettings.Default,
@@ -125,7 +93,6 @@ public class Boostrap : MonoBehaviour
         var renderMeshArray = new RenderMeshArray(new Material[] { unitMaterial }, new Mesh[] { unitMesh });
 
         RenderMeshUtility.AddComponents(prefab, entityManager, renderMeshDescription, renderMeshArray, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
-
 
         return prefab;
     }
@@ -177,30 +144,10 @@ public class Boostrap : MonoBehaviour
         {
             Value = position.xz,
         });
-
-        //entityManager.SetComponentData(unit, new CollisionEllipse
-        //{
-        //    Radii = new float2(size, size * 1.5f) * 0.5f,
-        //});
-
-        //entityManager.SetComponentData(unit, new CollisionPriority
-        //{
-        //    Value = math.lerp(5, 0.5f, sizePercent)
-        //});
     }
 
     public void OnValidate()
     {
-        if (seperationSingleton != Entity.Null)
-        {
-            entityManager.SetComponentData(seperationSingleton, new EllipseSeparationParams
-            {
-                SeparationStrength = SeparationStrength,
-                CrowdDampingFactor = CrowdDampingFactor,
-                CrowdNeighborThreshold = CrowdNeighborThreshold,
-                BackwardSuppression = BackwardSuppression,
-                MaxNeighborDistance = MaxNeighborDistance
-            });
-        }
+
     }
 }
