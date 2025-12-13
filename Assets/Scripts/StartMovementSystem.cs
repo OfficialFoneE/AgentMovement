@@ -5,7 +5,7 @@ using Unity.Transforms;
 
 [BurstCompile]
 [UpdateInGroup(typeof(FixedStepSimulationSystemGroup))]
-public partial struct MovementSystem : ISystem
+public partial struct StartMovementSystem : ISystem
 {
     [BurstCompile]
     public void OnCreate(ref SystemState state) { }
@@ -33,20 +33,6 @@ public partial struct MovementSystem : ISystem
             }
 
             desiredVelocity.ValueRW.Value = direction * math.min(maxSpeed.ValueRO.Value, distance);
-        }
-
-        var delatTime = SystemAPI.Time.DeltaTime;
-
-        // TODO:
-        // Run proper avoidance and seperation!
-
-        // Apply unit movement.
-        foreach (var (desiredVelocity, simLocalTransform) in SystemAPI.Query<RefRW<DesiredVelocity>, RefRW<SimLocalTransform>>())
-        {
-            var velocity2D = desiredVelocity.ValueRO.Value;
-            var velocity3D = new float3(velocity2D.x, 0, velocity2D.y);
-            simLocalTransform.ValueRW.Value.Position += velocity3D * delatTime;
-            simLocalTransform.ValueRW.Value.Rotation = quaternion.LookRotation(math.normalizesafe(velocity3D), math.up());
         }
     }
 }

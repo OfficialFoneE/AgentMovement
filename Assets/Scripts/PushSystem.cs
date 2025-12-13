@@ -31,7 +31,7 @@ public struct AgentSpatialData
 
 [BurstCompile]
 [UpdateInGroup(typeof(FixedStepSimulationSystemGroup))]
-[UpdateAfter(typeof(MovementSystem))]
+[UpdateAfter(typeof(EndMovementSystem))]
 public partial struct NavAgentOverlapResolutionSystem : ISystem
 {
     const int Iterations = 8;    // Number of positional solver iterations

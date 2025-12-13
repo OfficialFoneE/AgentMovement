@@ -44,10 +44,10 @@ public class Boostrap : MonoBehaviour
     {
         prefab = CreatePrefab();
 
-        for (int i = 0; i < 2; i++)
-        {
-            SpawnUnit();
-        }
+        //for (int i = 0; i < 2; i++)
+        //{
+        //    SpawnUnit();
+        //}
 
         var fixedStepSimulationSystemGroup = World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<FixedStepSimulationSystemGroup>();
         fixedStepSimulationSystemGroup.Timestep = 0.1f; // 10 Hz
@@ -55,9 +55,30 @@ public class Boostrap : MonoBehaviour
 
     void Update()
     {
-        if(Input.GetKey(KeyCode.Space))
+        if(Input.GetKey(KeyCode.Alpha1))
         {
-            SpawnUnit();
+            SpawnUnit(UnitTypes[0]);
+        }
+
+        if (Input.GetKey(KeyCode.Alpha2))
+        {
+            SpawnUnit(UnitTypes[1]);
+        }
+
+        if (Input.GetKey(KeyCode.Alpha3))
+        {
+            SpawnUnit(UnitTypes[2]);
+        }
+
+        if (Input.GetKey(KeyCode.Space))
+        {
+            if (UnitTypes.Length == 0)
+            {
+                Debug.LogError("Please add a unit type!", this);
+                return;
+            }
+
+            SpawnUnit(UnitTypes[UnityEngine.Random.Range(0, UnitTypes.Length)]);
         }
     }
 
@@ -71,7 +92,8 @@ public class Boostrap : MonoBehaviour
             ComponentType.ReadWrite<MaxSpeedComponent>(),
             ComponentType.ReadWrite<DesiredVelocity>(),
             ComponentType.ReadWrite<AgentComponent>(),
-            ComponentType.ReadWrite<DestinationComponent>());
+            ComponentType.ReadWrite<DestinationComponent>(),
+            ComponentType.ReadWrite<AvoidanceVelocity>());
 
         var localTransform = new LocalTransform
         {
@@ -97,16 +119,8 @@ public class Boostrap : MonoBehaviour
         return prefab;
     }
 
-    private void SpawnUnit()
+    private void SpawnUnit(UnitType unitType)
     {
-        if (UnitTypes.Length == 0)
-        {
-            Debug.LogError("Please add a unit type!", this);
-            return;
-        }
-
-        var unitType = UnitTypes[UnityEngine.Random.Range(0, UnitTypes.Length)];
-
         var unit = entityManager.Instantiate(prefab);
 
         var position = new float3(256 + UnityEngine.Random.Range(-0.01f, 0.01f), 0, 256 + UnityEngine.Random.Range(-0.01f, 0.01f));//new float3(UnityEngine.Random.Range(10, 11), 0, UnityEngine.Random.Range(-0.1f, 0.1f));

@@ -24,6 +24,12 @@ public struct AgentComponent : IComponentData
     }
 }
 
+public struct AvoidanceVelocity : IComponentData
+{
+    /// Smoothed velocity used for avoidance (XZ).
+    public float2 Value;
+}
+
 public struct MaxSpeedComponent : IComponentData
 {
     public float Value;
