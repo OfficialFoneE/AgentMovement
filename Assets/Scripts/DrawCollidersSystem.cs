@@ -25,6 +25,11 @@ public partial struct DrawCollidersSystem : ISystem
             builder.xz.WirePill(p1, p2, ellipse.ValueRO.Radius, UnityEngine.Color.blue);
         }
 
+        foreach (var (velocity, simTransform) in SystemAPI.Query<RefRO<AvoidanceVelocity>, RefRO<SimLocalTransform>>())
+        {
+            builder.xz.Arrow(simTransform.ValueRO.Value.Position.xz, simTransform.ValueRO.Value.Position.xz + velocity.ValueRO.Value, UnityEngine.Color.red);
+        }
+
         builder.Dispose();
     }
 }

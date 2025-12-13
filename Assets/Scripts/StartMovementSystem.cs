@@ -5,6 +5,7 @@ using Unity.Transforms;
 
 [BurstCompile]
 [UpdateInGroup(typeof(FixedStepSimulationSystemGroup))]
+[UpdateBefore(typeof(EndMovementSystem))]
 public partial struct StartMovementSystem : ISystem
 {
     [BurstCompile]
