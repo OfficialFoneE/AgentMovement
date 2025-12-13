@@ -6,152 +6,155 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-
-public struct AgentSpatialData
-{
-    public float2 Position;
-    public float2 Forward;
-    public float Length;      // Semi-axis along forward
-    public float Radius;        // Semi-axis perpendicular to forward
-    public float2 CorectionOffset;
-    public int CorrectionCount;
-    public float Priority;
-
-    public float PenetrationSum;
-    public float Padding;
-
-    public void GetMinMax(out float2 min, out float2 max)
-    {
-        var p1 = Position - Forward * Length * 0.5f;
-        var p2 = Position + Forward * Length * 0.5f;
-        min = math.min(p1 - Radius, p2 - Radius);
-        max = math.max(p1 + Radius, p2 + Radius);
-    }
-}
+using UnityEngine;
 
 [BurstCompile]
-[UpdateInGroup(typeof(FixedStepSimulationSystemGroup))]
-[UpdateAfter(typeof(EllipticalSeparationSystem))]
-public partial struct NavAgentOverlapResolutionSystem : ISystem
+[UpdateInGroup(typeof(SimulationSystemGroup))]
+public partial struct SelectionSystemSystem : ISystem
 {
-    const int Iterations = 8;    // Number of positional solver iterations
-    const float SeparationBias = 1.1f;//1.05f;//1.1f;//1.05f;
+    public NativeList<Entity> highlightedEntities;
+    public NativeList<Entity> selectedEntities;
 
-    private readonly static int2 mapSize = new int2(512, 512) * 4;
-    private readonly static int cellSize = 8;
-
-    private SpatialGrid<AgentSpatialData> spatialGrid;
+    public float2 selectionStart;
+    public float2 selectionEnd;
 
     [BurstCompile]
-    public void OnCreate(ref SystemState state) 
+    public void OnCreate(ref SystemState state)
     {
-        spatialGrid = new SpatialGrid<AgentSpatialData>(mapSize, cellSize, 100000, Allocator.Persistent);
+        highlightedEntities = new NativeList<Entity>(10000, Allocator.Persistent);
+        selectedEntities = new NativeList<Entity>(10000, Allocator.Persistent);
+
+        selectionStart = 0;
+        selectionEnd = 0;
     }
 
     [BurstCompile]
-    public void OnDestroy(ref SystemState state) { spatialGrid.Dispose(); }
+    public void OnDestroy(ref SystemState state) 
+    { 
+        highlightedEntities.Dispose(); 
+        selectedEntities.Dispose(); 
+    }
 
-    //[BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        if (Boostrap.Instance.DrawGrid)
+        var mousePosition = GetMousePosition();
+
+        if (Input.GetMouseButtonDown(0))
         {
-            spatialGrid.Draw();
+            selectionStart = mousePosition;
         }
 
-        for (int i = 0; i < Iterations; i++)
+        if (Input.GetMouseButton(0))
         {
-            var resetJob = new SpatialGrid<AgentSpatialData>.ResetPrefixSum()
+            selectionEnd = mousePosition;
+
+            ScheduleHighlightJob(ref state);
+        }
+
+        if (Input.GetMouseButtonUp(0))
+        {
+            selectionEnd = mousePosition;
+
+            ScheduleHighlightJob(ref state);
+        }
+
+        state.Dependency = new ClearHighlightJob
+        {
+            highlightedEntities = highlightedEntities,
+            selectedEntities = selectedEntities,
+            confirmSelection = Input.GetMouseButtonUp(0),
+        }.Schedule(state.Dependency);
+
+        if(Input.GetMouseButtonDown(1))
+        {
+            state.Dependency = new SetDestinationJob
             {
-                activeCells = spatialGrid.activeCells,
-                cellCounts = spatialGrid.cellCounts,
-            };
-
-            var calculateCountsJob = new CalculateHardForceCellCounts()
-            {
-                gridProperties = spatialGrid.gridProperties,
-                cellCounts = spatialGrid.cellCounts,
-            };
-
-            var calculateOffsetsJob = new SpatialGrid<AgentSpatialData>.CalculateCellOffsets()
-            {
-                activeCells = spatialGrid.activeCells,
-                cellCounts = spatialGrid.cellCounts,
-                cellOffsets = spatialGrid.cellOffsets,
-            };
-
-            var PopulateHardForceGridData = new PopulateHardForceGridData()
-            {
-                gridProperties = spatialGrid.gridProperties,
-                cellOffsets = spatialGrid.cellOffsets,
-                spatialData = spatialGrid.cellData,
-            };
-
-
-            var ProcessHardForces = new ProcessHardForces()
-            {
-                activeCells = spatialGrid.activeCells.AsDeferredJobArray(),
-                gridProperties = spatialGrid.gridProperties,
-                cellCounts = spatialGrid.cellCounts,
-                cellOffsets = spatialGrid.cellOffsets,
-                spatialData = spatialGrid.cellData,
-                SeparationBias = SeparationBias,
-            };
-
-            var IJobEntity_WriteHardForces = new IJobEntity_WriteHardForces()
-            {
-                spatialData = spatialGrid.cellData,
-                CrowdingFactorChangeSpeed = 1,
-                Iterations = Iterations,
-            };
-
-            state.Dependency = resetJob.Schedule(state.Dependency);
-            state.Dependency = calculateCountsJob.ScheduleParallel(state.Dependency);
-            state.Dependency = calculateOffsetsJob.Schedule(state.Dependency);
-            state.Dependency = PopulateHardForceGridData.ScheduleParallel(state.Dependency);
-            state.Dependency = ProcessHardForces.Schedule(spatialGrid.activeCells, 1, state.Dependency);
-            state.Dependency = IJobEntity_WriteHardForces.ScheduleParallel(state.Dependency);
+                selectedEntities = selectedEntities,
+                destinationLookup = SystemAPI.GetComponentLookup<DestinationComponent>(),
+                target = mousePosition,
+            }.Schedule(state.Dependency);
         }
 
         state.Dependency.Complete();
     }
 
-    [BurstCompile]
-    public partial struct CalculateHardForceCellCounts : IJobEntity
+    private float2 GetMousePosition()
     {
-        [ReadOnly]  public SpatialGridProperties gridProperties;
+        var target = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        return new float2(target.x, target.z);
+    }
 
-        [NativeDisableParallelForRestriction]
-        [WriteOnly] public NativeArray<int> cellCounts;
+    private void ScheduleHighlightJob(ref SystemState state)
+    {
+        var min = math.min(selectionStart, selectionEnd);
+        var max = math.max(selectionStart, selectionEnd);
 
-        public void Execute(in SimLocalTransform simTranslation, ref AgentComponent agent)
+        if (math.distance(min, max) < 0.01f)
+            return;
+
+        state.Dependency = new HighlightJob
         {
-            agent.Indicies.Clear();
+            min = min,
+            max = max,
+            highlightedEntities = highlightedEntities.AsParallelWriter(),
+        }.ScheduleParallel(state.Dependency);
+    }
 
-            //var min = simTranslation.Value.Position.xz - agent.Radius;
-            //var max = simTranslation.Value.Position.xz + agent.Radius;
-            agent.GetMinMax(simTranslation.Value.Position.xz, math.normalize(simTranslation.Value.Forward().xz), out var agentMinimum, out var agentMaximum);
-            var minCell = gridProperties.GetCellKeyClamped(agentMinimum);
-            var maxCell = gridProperties.GetCellKeyClamped(agentMaximum);
+    [BurstCompile]
+    public partial struct HighlightJob : IJobEntity
+    {
+        public float2 min;
+        public float2 max;
 
-            for (int y = minCell.y; y <= maxCell.y; y++)
+        public NativeList<Entity>.ParallelWriter highlightedEntities;
+
+        public void Execute(Entity entity, in LocalTransform localTransform, ref AgentComponent agent)
+        {
+            var position = localTransform.Position.xz;
+
+            if (math.all(min < position) & math.all(max > position))
             {
-                for (int x = minCell.x; x <= maxCell.x; x++)
-                {
-                    var cellIndex = gridProperties.GetCellIndex(new int2(x, y));
+                highlightedEntities.AddNoResize(entity);
+            }
+        }
+    }
 
-                    unsafe
-                    {
-                        var index = System.Threading.Interlocked.Increment(ref UnsafeUtility.ArrayElementAsRef<int>(cellCounts.GetUnsafePtr(), cellIndex)) - 1;
-                        
-                        if (agent.Indicies.Length + 1 >= agent.Indicies.Capacity)
-                        {
-                            UnityEngine.Debug.LogError("We hit max capacity, we should not be able to do this...");
-                            continue;
-                        }
-                        agent.Indicies.Add(index);
-                    }
-                }
+    [BurstCompile]
+    public struct ClearHighlightJob : IJob
+    {
+        public bool confirmSelection;
+
+        public NativeList<Entity> highlightedEntities;
+        [WriteOnly] public NativeList<Entity> selectedEntities;
+
+        public void Execute()
+        {
+            if(confirmSelection)
+            {
+                selectedEntities.Clear();
+                selectedEntities.AddRange(highlightedEntities.AsArray());
+            }
+
+            highlightedEntities.Clear();
+        }
+    }
+
+    [BurstCompile]
+    public struct SetDestinationJob : IJob
+    {
+        public float2 target;
+
+        [ReadOnly] public NativeList<Entity> selectedEntities;
+
+        public ComponentLookup<DestinationComponent> destinationLookup;
+
+        public void Execute()
+        {
+            for (int i = 0; i < selectedEntities.Length; i++)
+            {
+                var destination = destinationLookup.GetRefRW(selectedEntities[i]);
+
+                destination.ValueRW.Value = target;
             }
         }
     }

@@ -43,7 +43,6 @@ public class Boostrap : MonoBehaviour
 
     private EntityManager entityManager => World.DefaultGameObjectInjectionWorld.EntityManager;
 
-    private Entity destinationSingleton;
     private Entity seperationSingleton;
 
     private void Awake()
@@ -60,11 +59,6 @@ public class Boostrap : MonoBehaviour
         {
             SpawnUnit();
         }
-
-        destinationSingleton = entityManager.CreateSingleton(new DestinationSingleton
-        {
-            destination = float3.zero
-        });
 
         seperationSingleton = entityManager.CreateSingleton(new EllipseSeparationParams
         {
@@ -85,11 +79,6 @@ public class Boostrap : MonoBehaviour
         {
             SpawnUnit();
         }
-
-        entityManager.SetComponentData(destinationSingleton, new DestinationSingleton
-        {
-            destination = targetDesintation.position,
-        });
     }
 
     private Entity CreatePrefab()
@@ -99,11 +88,12 @@ public class Boostrap : MonoBehaviour
             ComponentType.ReadOnly<LocalTransform>(),
             ComponentType.ReadOnly<PastSimLocalTransform>(),
             ComponentType.ReadOnly<SimLocalTransform>(),
-            ComponentType.ReadWrite<MaxSpeed>(),
+            ComponentType.ReadWrite<MaxSpeedComponent>(),
             ComponentType.ReadWrite<CollisionEllipse>(), 
             ComponentType.ReadWrite<CollisionPriority>(),
             ComponentType.ReadWrite<DesiredVelocity>(),
-            ComponentType.ReadWrite<AgentComponent>());
+            ComponentType.ReadWrite<AgentComponent>(),
+            ComponentType.ReadWrite<DestinationComponent>());
 
         var localTransform = new LocalTransform
         {
@@ -144,7 +134,7 @@ public class Boostrap : MonoBehaviour
     {
         if (UnitTypes.Length == 0)
         {
-            UnityEngine.Debug.LogError("Please add a unit type!", this);
+            Debug.LogError("Please add a unit type!", this);
             return;
         }
 
@@ -170,7 +160,7 @@ public class Boostrap : MonoBehaviour
         entityManager.SetComponentData(unit, new SimLocalTransform { Value = localTransform });
         entityManager.SetComponentData(unit, new PastSimLocalTransform { Value = localTransform });
 
-        entityManager.SetComponentData(unit, new MaxSpeed
+        entityManager.SetComponentData(unit, new MaxSpeedComponent
         {
             Value = unitType.Speed,
         });
@@ -181,6 +171,11 @@ public class Boostrap : MonoBehaviour
             BaseRadius = unitType.Radius,
             CrowdingFactor = 1,
             AvoidancePriority = unitType.AvoidancePriority,
+        });
+
+        entityManager.SetComponentData(unit, new DestinationComponent
+        {
+            Value = position.xz,
         });
 
         //entityManager.SetComponentData(unit, new CollisionEllipse

@@ -6,15 +6,6 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
 
-public struct MaxSpeed : IComponentData
-{
-    public float Value;
-}
-
-public struct DestinationSingleton : IComponentData
-{
-    public float3 destination;
-}
 
 public struct CollisionEllipse : IComponentData
 {
@@ -87,7 +78,6 @@ public partial struct EllipticalSeparationSystem : ISystem
         });
 
         state.RequireForUpdate<EllipseSeparationParams>();
-        state.RequireForUpdate<DestinationSingleton>();
     }
 
     public void OnDestroy(ref SystemState state)
@@ -101,30 +91,28 @@ public partial struct EllipticalSeparationSystem : ISystem
 
         builder.Preallocate(10000);
 
-        var destination = SystemAPI.QueryBuilder().WithAll<DestinationSingleton>().Build().GetSingleton<DestinationSingleton>();
-
         foreach (var (pastSimTransform, simTransform) in SystemAPI.Query<RefRW<PastSimLocalTransform>, RefRO<SimLocalTransform>>())
         {
             pastSimTransform.ValueRW.Value = simTransform.ValueRO.Value;
         }
 
-        if(true)
+        if (false)
         {
             builder.DiscardAndDispose();
             return;
         }
 
-        foreach (var (desiredVelocity, simLocalTransform, maxSpeed) in SystemAPI.Query<RefRW<DesiredVelocity>, RefRO<SimLocalTransform>, RefRO<MaxSpeed>>())
+        foreach (var (desiredVelocity, simLocalTransform, maxSpeed, destination) in SystemAPI.Query<RefRW<DesiredVelocity>, RefRO<SimLocalTransform>, RefRO<MaxSpeedComponent>, RefRO<DestinationComponent>>())
         {
-            var direction = math.normalizesafe(destination.destination - simLocalTransform.ValueRO.Value.Position);
+            var direction = math.normalizesafe(destination.ValueRO.Value - simLocalTransform.ValueRO.Value.Position.xz);
 
-            var distance = math.distance(destination.destination, simLocalTransform.ValueRO.Value.Position);
+            var distance = math.distance(destination.ValueRO.Value, simLocalTransform.ValueRO.Value.Position.xz);
             if (distance < 0.01f)
             {
                 distance = 0;
             }
 
-            desiredVelocity.ValueRW.Value = direction.xz * math.min(maxSpeed.ValueRO.Value, distance);
+            desiredVelocity.ValueRW.Value = direction * math.min(maxSpeed.ValueRO.Value, distance);
         }
 
         int count = _unitQuery.CalculateEntityCount();
@@ -351,7 +339,7 @@ public partial struct EllipticalSeparationSystem : ISystem
                         }
                     }
 
-                    commandBuilder.xz.Line(posI, posJ);
+                    //commandBuilder.xz.Line(posI, posJ);
 
                     separationAccum += pushI;
                 }

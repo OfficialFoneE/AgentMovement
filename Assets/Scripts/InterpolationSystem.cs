@@ -21,34 +21,3 @@ public partial struct InterpolationSystem : ISystem
         }
     }
 }
-
-[BurstCompile]
-[UpdateInGroup(typeof(PresentationSystemGroup))]
-public partial struct DrawCollidersSystem : ISystem
-{
-    public void OnUpdate(ref SystemState state)
-    {
-        if (Boostrap.Instance.DrawRadiuses == false)
-            return;
-
-        var builder = DrawingManager.GetBuilder(true);
-
-        builder.Preallocate(10000);
-
-        foreach (var (ellipse, simTransform) in SystemAPI.Query<RefRO<AgentComponent>, RefRO<SimLocalTransform>>())
-        {
-            var p1 = simTransform.ValueRO.Value.Position.xz - math.normalize(simTransform.ValueRO.Value.Forward().xz) * ellipse.ValueRO.Length * 0.5f;
-            var p2 = simTransform.ValueRO.Value.Position.xz + math.normalize(simTransform.ValueRO.Value.Forward().xz) * ellipse.ValueRO.Length * 0.5f;
-
-            builder.xz.WirePill(p1, p2, ellipse.ValueRO.BaseRadius, UnityEngine.Color.cyan);
-            builder.xz.WirePill(p1, p2, ellipse.ValueRO.Radius, UnityEngine.Color.blue);
-
-            //var t = simTransform.ValueRO.Value;
-            //builder.PushMatrix(float4x4.TRS(t.Position, t.Rotation, new float3(ellipse.ValueRO.RightRadius, 1, ellipse.ValueRO.ForwardRadius)));
-            //builder.xz.Circle(float2.zero, 1);
-            //builder.PopMatrix();
-        }
-
-        builder.Dispose();
-    }
-}
