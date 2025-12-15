@@ -796,26 +796,33 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82fa696c18083c140bf2b5ddbd422c07, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  agentCount: 30
-  spawnRadius: 12
+  scenario: 2
   randomSeed: 1
+  agentCount: 30
+  movingCount: 20
+  idleCount: 20
+  bounceBounds: 0
+  boundsHalfExtents: {x: 10, y: 6}
   radius: 0.19
   length: 0.82
   varySizes: 1
   speed: 1.64
-  seekCenter: 0
-  bounceBounds: 0
-  boundsHalfExtents: {x: 10, y: 6}
+  arriveRadius: 0.6
   horizonSeconds: 1
   extraSeparation: 0.05
   maxDeltaSpeed: 10
   minResponseTime: 0.05
   iterations: 3
+  maxAccel: 25
+  realignStrength: 0.65
   preserveSpeed: 1
+  clumpRadius: 2.2
+  clumpSeparationX: 9
+  idleClumpRadius: 2.4
   drawCapsules: 1
   drawVelocities: 1
-  drawPredictedPositions: 0
-  drawPairDebugForAgent: -1
+  drawTargets: 1
+  drawDesiredVel: 0
 --- !u!4 &1870139327
 Transform:
   m_ObjectHideFlags: 0
