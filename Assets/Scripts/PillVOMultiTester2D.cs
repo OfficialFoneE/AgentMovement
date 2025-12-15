@@ -31,6 +31,10 @@ public class PillVOScenarioTester2D : MonoBehaviour
     public float speed = 3.5f;
     public float arriveRadius = 0.6f;
 
+    [Header("Priority / Pushability")]
+    public float movingPushability = 1f;   // lower = higher priority (moves less)
+    public float idlePushability = 4f;     // higher = lower priority (gets pushed more)
+
     [Header("Avoidance")]
     public float horizonSeconds = 0.9f;
     public float extraSeparation = 0.05f;
@@ -111,6 +115,14 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
             if (a.invMass <= 0f)
             {
+                // If you still ever use invMass<=0 as “frozen”, keep this.
+                _desiredVels[i] = Vector2.zero;
+                continue;
+            }
+
+            // If this agent is “idle priority” (pushable) we still want it to settle to zero:
+            if (scenario == Scenario.MovingClumpThroughIdleClump && a.group == 1 /* idle group */)
+            {
                 _desiredVels[i] = Vector2.zero;
                 continue;
             }
@@ -160,16 +172,26 @@ public class PillVOScenarioTester2D : MonoBehaviour
                     newVA -= A.facing * EPS_DIR;
                     newVB -= B.facing * EPS_DIR;
 
-                    Vector2 dA = newVA - A.velocity;
-                    Vector2 dB = newVB - B.velocity;
+                    Vector2 dA_half = newVA - A.velocity; // this is “half” correction (from AvoidPair)
+                    Vector2 dB_half = newVB - B.velocity;
 
-                    // If one agent is idle (invMass=0), apply the *entire* reciprocal response to the mover.
-                    // AvoidPair applies +/-delta (half each). For “infinite mass obstacle”, mover gets +/-2*delta.
-                    if (A.invMass > 0f && B.invMass <= 0f) dA *= 2f;
-                    if (B.invMass > 0f && A.invMass <= 0f) dB *= 2f;
+                    // full relative correction vector (n * deltaSpeed)
+                    Vector2 full = dB_half - dA_half; // == (newVB-oldVB) - (newVA-oldVA)
 
-                    if (A.invMass > 0f) deltaV[i] += dA;
-                    if (B.invMass > 0f) deltaV[j] += dB;
+                    float wA = A.invMass;
+                    float wB = B.invMass;
+                    float wSum = wA + wB;
+
+                    // guard
+                    if (wSum > 1e-6f)
+                    {
+                        float shareA = wA / wSum;
+                        float shareB = wB / wSum;
+
+                        // Apply more of the correction to the more “pushable” agent
+                        deltaV[i] += (-full * shareA);
+                        deltaV[j] += (full * shareB);
+                    }
                 }
             }
 
@@ -193,12 +215,24 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
                 a.velocity += steer * Mathf.Clamp01(realignStrength);
 
+                // Clamp velocity to max speed.
+                // Required for idle agents as they might be pushed very hard due to having less prio.
+                {
+                    var vmag = a.velocity.magnitude;
+                    if(vmag > 1e-6f && vmag > speed)
+                    {
+                        a.velocity = (a.velocity / vmag) * speed;
+                    }
+                }
+
                 if (preserveSpeed)
                 {
                     float targetSpeed = desired.magnitude;
                     float vmag = a.velocity.magnitude;
                     if (vmag > 1e-6f && targetSpeed > 1e-6f)
+                    {
                         a.velocity = a.velocity * (targetSpeed / vmag);
+                    }
                 }
             }
         }
@@ -378,7 +412,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 target = target,
                 radius = r,
                 halfLength = hl,
-                invMass = 1f,
+                invMass = movingPushability,
                 group = 0
             };
         }
@@ -407,7 +441,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 target = pos,
                 radius = r,
                 halfLength = hl,
-                invMass = 0f,
+                invMass = idlePushability,
                 group = 1
             };
         }
@@ -431,7 +465,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
             case Scenario.MovingClumpThroughIdleClump:
                 // Movers: keep going left <-> right
-                if (a.invMass > 0f)
+                if (a.group == 0)
                 {
                     float side = (a.position.x - _worldCenter.x) >= 0f ? -1f : +1f;
                     a.target = _worldCenter + new Vector2(side * boundsHalfExtents.x * 0.85f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y));
