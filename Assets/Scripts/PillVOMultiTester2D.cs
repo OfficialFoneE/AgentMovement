@@ -18,6 +18,17 @@ public class PillVOMultiTester2D : MonoBehaviour
     public bool bounceBounds = true;
     public Vector2 boundsHalfExtents = new Vector2(10, 6);
 
+    [Header("Targets")]
+    public float arriveRadius = 0.6f;     // when close, pick a new target
+    public bool drawTargets = true;
+
+    [Header("Steering Back To Target")]
+    public float maxAccel = 25f;          // units/sec^2 (converted to maxSteerDeltaSpeed via dt)
+    [Range(0f, 1f)] public float realignStrength = 0.65f;
+
+    private Vector2[] _targets;
+    private Vector2[] _desiredVels;
+
     //In crowds, increasing iterations should reduce “sticking”.
     //If they jitter, increase minResponseTime slightly (e.g. 0.08) and/or clamp maxDeltaSpeed.
 
@@ -48,6 +59,12 @@ public class PillVOMultiTester2D : MonoBehaviour
         Random.InitState(randomSeed);
 
         _agents = new PillVOMulti2D.Agent[agentCount];
+
+        _targets = new Vector2[agentCount];
+        _desiredVels = new Vector2[agentCount];
+
+        for (int i = 0; i < agentCount; i++)
+            _targets[i] = RandomPointInBounds((Vector2)transform.position, boundsHalfExtents);
 
         for (int i = 0; i < agentCount; i++)
         {
@@ -80,20 +97,23 @@ public class PillVOMultiTester2D : MonoBehaviour
     {
         if (_agents == null || _agents.Length == 0) return;
 
-        // Optional steering to increase interactions
-        if (seekCenter)
+        float dt = Time.fixedDeltaTime;
+        Vector2 worldCenter = (Vector2)transform.position;
+
+        for (int i = 0; i < _agents.Length; i++)
         {
-            Vector2 center = (Vector2)transform.position;
-            for (int i = 0; i < _agents.Length; i++)
+            var a = _agents[i];
+            Vector2 toT = _targets[i] - a.position;
+
+            // If arrived, pick a new target
+            if (toT.sqrMagnitude <= arriveRadius * arriveRadius)
             {
-                Vector2 toC = (center - _agents[i].position);
-                if (toC.sqrMagnitude > 1e-6f)
-                {
-                    Vector2 desired = toC.normalized * speed;
-                    // light steering (keeps test stable)
-                    _agents[i].velocity = Vector2.Lerp(_agents[i].velocity, desired, 0.08f);
-                }
+                _targets[i] = RandomPointInBounds(worldCenter, boundsHalfExtents);
+                toT = _targets[i] - a.position;
             }
+
+            Vector2 dir = (toT.sqrMagnitude > 1e-6f) ? (toT.normalized) : Vector2.right;
+            _desiredVels[i] = dir * speed;
         }
 
         // Avoidance step
@@ -104,13 +124,16 @@ public class PillVOMultiTester2D : MonoBehaviour
             maxDeltaSpeed = maxDeltaSpeed,
             minResponseTime = minResponseTime,
             iterations = iterations,
-            preserveSpeed = preserveSpeed
+            preserveSpeed = preserveSpeed,
+
+            // new:
+            realignStrength = realignStrength,
+            maxSteerDeltaSpeed = maxAccel * Time.fixedDeltaTime
         };
 
-        PillVOMulti2D.Step(ref _agents, settings);
+        PillVOMulti2D.Step(ref _agents, settings, _desiredVels);
 
         // Integrate positions
-        float dt = Time.fixedDeltaTime;
         for (int i = 0; i < _agents.Length; i++)
         {
             _agents[i].position += _agents[i].velocity * dt;
@@ -130,6 +153,13 @@ public class PillVOMultiTester2D : MonoBehaviour
             Gizmos.color = new Color(1f, 1f, 1f, 0.15f);
             Vector3 c = transform.position;
             Gizmos.DrawWireCube(c, new Vector3(boundsHalfExtents.x * 2, boundsHalfExtents.y * 2, 0));
+        }
+
+        if (drawTargets && _targets != null)
+        {
+            Gizmos.color = new Color(0.2f, 0.8f, 1f, 0.8f);
+            for (int i = 0; i < _targets.Length; i++)
+                Gizmos.DrawSphere(new Vector3(_targets[i].x, _targets[i].y, 0f), 0.08f);
         }
 
         for (int i = 0; i < _agents.Length; i++)
@@ -216,6 +246,13 @@ public class PillVOMultiTester2D : MonoBehaviour
         if (p.y > halfExt.y) { p.y = halfExt.y; a.velocity.y = -Mathf.Abs(a.velocity.y); }
 
         a.position = center + p;
+    }
+
+    private static Vector2 RandomPointInBounds(Vector2 center, Vector2 halfExt)
+    {
+        return center + new Vector2(
+            Random.Range(-halfExt.x, halfExt.x),
+            Random.Range(-halfExt.y, halfExt.y));
     }
 
     private static void DrawCapsule2D(Vector2 center, Vector2 velocity, float halfLen, float radius)

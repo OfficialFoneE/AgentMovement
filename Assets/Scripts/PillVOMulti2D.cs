@@ -19,6 +19,78 @@ public static class PillVOMulti2D
         public float minResponseTime;    // stabilizer when tMin ~ 0
         public int iterations;           // solver passes (1-6 typical)
         public bool preserveSpeed;       // keep original speed magnitude after avoidance
+        public float realignStrength;      // 0..1, how hard we steer back toward desired velocity per solver-iteration
+        public float maxSteerDeltaSpeed;   // max speed change toward desired per iteration (set to maxAccel * dt in tester)
+    }
+
+    public static void Step(ref Agent[] agents, in Settings s, Vector2[] desiredVelocities)
+    {
+        if (agents == null || agents.Length <= 1) return;
+        int n = agents.Length;
+
+        int iters = Mathf.Max(1, s.iterations);
+        Vector2[] deltaV = new Vector2[n];
+
+        // Optional: preserve the *desired* speed magnitude instead of current speed
+        float[] desiredSpeed = null;
+        if (s.preserveSpeed && desiredVelocities != null && desiredVelocities.Length == n)
+        {
+            desiredSpeed = new float[n];
+            for (int i = 0; i < n; i++) desiredSpeed[i] = desiredVelocities[i].magnitude;
+        }
+
+        for (int iter = 0; iter < iters; iter++)
+        {
+            System.Array.Clear(deltaV, 0, n);
+
+            for (int i = 0; i < n; i++)
+            {
+                for (int j = i + 1; j < n; j++)
+                {
+                    var a = agents[i];
+                    var b = agents[j];
+
+                    Pill2DVO.AvoidPair(
+                        new Pill2DVO.Capsule { center = a.position, velocity = a.velocity, halfLength = a.halfLength, radius = a.radius },
+                        new Pill2DVO.Capsule { center = b.position, velocity = b.velocity, halfLength = b.halfLength, radius = b.radius },
+                        s.horizonSeconds, s.extraSeparation, s.maxDeltaSpeed, s.minResponseTime,
+                        out Vector2 newVA, out Vector2 newVB, out _);
+
+                    deltaV[i] += (newVA - a.velocity);
+                    deltaV[j] += (newVB - b.velocity);
+                }
+            }
+
+            // Apply avoidance + realign-to-target steering
+            for (int i = 0; i < n; i++)
+            {
+                agents[i].velocity += deltaV[i];
+
+                if (desiredVelocities != null && desiredVelocities.Length == n)
+                {
+                    Vector2 desired = desiredVelocities[i];
+                    Vector2 steer = desired - agents[i].velocity;
+
+                    // Clamp how hard we steer back this iteration
+                    float maxDv = Mathf.Max(0f, s.maxSteerDeltaSpeed);
+                    float mag = steer.magnitude;
+                    if (maxDv > 0f && mag > maxDv) steer *= (maxDv / mag);
+
+                    float k = Mathf.Clamp01(s.realignStrength);
+                    agents[i].velocity += steer * k;
+                }
+
+                // Preserve speed (prefer desired speed if provided)
+                if (s.preserveSpeed)
+                {
+                    float target = (desiredSpeed != null) ? desiredSpeed[i] : agents[i].velocity.magnitude;
+                    Vector2 v = agents[i].velocity;
+                    float mag = v.magnitude;
+                    if (mag > 1e-6f && target > 1e-6f)
+                        agents[i].velocity = v * (target / mag);
+                }
+            }
+        }
     }
 
     /// <summary>
