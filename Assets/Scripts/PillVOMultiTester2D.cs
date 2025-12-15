@@ -47,6 +47,9 @@ public class PillVOScenarioTester2D : MonoBehaviour
     [Range(0f, 1f)] public float realignStrength = 0.65f;
     public bool preserveSpeed = true;
 
+    [Header("Capsule Orientation Stability")]
+    public float maxTurnDegPerSec = 360f;   // try 180..720
+
     [Header("Scenario Geometry")]
     public float clumpRadius = 2.2f;
     public float clumpSeparationX = 9.0f;    // for DenseClumpsCrossing
@@ -155,28 +158,28 @@ public class PillVOScenarioTester2D : MonoBehaviour
                     if (A.invMass <= 0f && B.invMass <= 0f)
                         continue;
 
-                    // Tiny epsilon to keep capsule orientation stable when near-zero speed.
-                    const float EPS_DIR = 1e-4f;
-                    Vector2 vA = A.velocity + A.facing * EPS_DIR;
-                    Vector2 vB = B.velocity + B.facing * EPS_DIR;
+                    // Use proxy velocities ONLY for the capsule orientation used by AvoidPair.
+                    // IMPORTANT: compute dv against what you passed in (proxy), not against A.velocity.
+                    float spA = Mathf.Max(A.velocity.magnitude, 1e-4f);
+                    float spB = Mathf.Max(B.velocity.magnitude, 1e-4f);
+
+                    Vector2 vA_proxy = A.facing.normalized * spA;
+                    Vector2 vB_proxy = B.facing.normalized * spB;
 
                     Pill2DVO.AvoidPair(
-                        new Pill2DVO.Capsule { center = A.position, velocity = vA, halfLength = A.halfLength, radius = A.radius },
-                        new Pill2DVO.Capsule { center = B.position, velocity = vB, halfLength = B.halfLength, radius = B.radius },
+                        new Pill2DVO.Capsule { center = A.position, velocity = vA_proxy, halfLength = A.halfLength, radius = A.radius },
+                        new Pill2DVO.Capsule { center = B.position, velocity = vB_proxy, halfLength = B.halfLength, radius = B.radius },
                         horizonSeconds, extraSeparation, maxDeltaSpeed, minResponseTime,
-                        out Vector2 newVA,
-                        out Vector2 newVB,
+                        out Vector2 vA_proxyNew,
+                        out Vector2 vB_proxyNew,
                         out _);
 
-                    // Remove the epsilon we added (we don't want it to accumulate)
-                    newVA -= A.facing * EPS_DIR;
-                    newVB -= B.facing * EPS_DIR;
+                    // dv in proxy space (this is what AvoidPair actually solved for)
+                    Vector2 dA_half = vA_proxyNew - vA_proxy;
+                    Vector2 dB_half = vB_proxyNew - vB_proxy;
 
-                    Vector2 dA_half = newVA - A.velocity; // this is “half” correction (from AvoidPair)
-                    Vector2 dB_half = newVB - B.velocity;
-
-                    // full relative correction vector (n * deltaSpeed)
-                    Vector2 full = dB_half - dA_half; // == (newVB-oldVB) - (newVA-oldVA)
+                    // full relative correction (equal and opposite)
+                    Vector2 full = dB_half - dA_half;
 
                     float wA = A.invMass;
                     float wB = B.invMass;
@@ -248,8 +251,14 @@ public class PillVOScenarioTester2D : MonoBehaviour
             if (bounceBounds)
                 BounceInBounds(ref a, _worldCenter, boundsHalfExtents);
 
-            float vsq = a.velocity.sqrMagnitude;
-            if (vsq > 1e-6f) a.facing = a.velocity / Mathf.Sqrt(vsq);
+            if (a.velocity.sqrMagnitude > 1e-6f)
+            {
+                Vector2 velDir = a.velocity.normalized;
+                a.facing = RotateTowards2D(a.facing, velDir, maxTurnDegPerSec * Mathf.Deg2Rad * dt);
+            }
+
+            //float vsq = a.velocity.sqrMagnitude;
+            //if (vsq > 1e-6f) a.facing = a.velocity / Mathf.Sqrt(vsq);
         }
     }
 
@@ -495,9 +504,30 @@ public class PillVOScenarioTester2D : MonoBehaviour
         a.position = center + p;
     }
 
+    private static Vector2 RotateTowards2D(Vector2 from, Vector2 to, float maxRadians)
+    {
+        if (from.sqrMagnitude < 1e-8f) from = Vector2.right;
+        if (to.sqrMagnitude < 1e-8f) return from.normalized;
+
+        from.Normalize();
+        to.Normalize();
+
+        // signed angle from->to
+        float cross = from.x * to.y - from.y * to.x;
+        float dot = Mathf.Clamp(Vector2.Dot(from, to), -1f, 1f);
+        float angle = Mathf.Atan2(cross, dot);
+
+        float step = Mathf.Clamp(angle, -maxRadians, maxRadians);
+
+        float s = Mathf.Sin(step);
+        float c = Mathf.Cos(step);
+
+        return new Vector2(from.x * c - from.y * s, from.x * s + from.y * c).normalized;
+    }
+
     private static void DrawCapsule2D(Vector2 center, Vector2 velocity, Vector2 facing, float halfLen, float radius)
     {
-        Vector2 dir = (velocity.sqrMagnitude > 1e-8f) ? velocity.normalized : (facing.sqrMagnitude > 1e-8f ? facing.normalized : Vector2.right);
+        Vector2 dir = facing.normalized; //(velocity.sqrMagnitude > 1e-8f) ? velocity.normalized : (facing.sqrMagnitude > 1e-8f ? facing.normalized : Vector2.right);
         Vector2 a = center - dir * halfLen;
         Vector2 b = center + dir * halfLen;
 

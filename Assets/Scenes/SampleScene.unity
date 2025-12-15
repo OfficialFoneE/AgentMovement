@@ -808,6 +808,8 @@ MonoBehaviour:
   varySizes: 1
   speed: 1.64
   arriveRadius: 0.6
+  movingPushability: 1
+  idlePushability: 4
   horizonSeconds: 1
   extraSeparation: 0.05
   maxDeltaSpeed: 10
@@ -816,13 +818,14 @@ MonoBehaviour:
   maxAccel: 25
   realignStrength: 0.65
   preserveSpeed: 1
+  maxTurnDegPerSec: 360
   clumpRadius: 2.2
   clumpSeparationX: 9
   idleClumpRadius: 2.4
   drawCapsules: 1
   drawVelocities: 1
   drawTargets: 1
-  drawDesiredVel: 0
+  drawDesiredVel: 1
 --- !u!4 &1870139327
 Transform:
   m_ObjectHideFlags: 0
