@@ -1,7 +1,6 @@
 using Drawing;
 using Unity.Burst;
 using Unity.Collections;
-using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -10,394 +9,318 @@ using Unity.Transforms;
 /// <summary>
 /// Velocity-based avoidance system for smooth unit movement in large groups.
 /// Uses reciprocal velocity obstacles for cooperative avoidance.
+/// Simple O(n²) implementation for clarity - optimize with spatial partitioning later.
 /// </summary>
 [BurstCompile]
 [UpdateInGroup(typeof(FixedStepSimulationSystemGroup))]
 [UpdateAfter(typeof(StartMovementSystem))]
+[UpdateBefore(typeof(EndMovementSystem))]
 [UpdateBefore(typeof(NavAgentOverlapResolutionSystem))]
 public partial struct AvoidanceSystem : ISystem
 {
-    private readonly static int2 mapSize = new int2(512, 512) * 4;
-    private readonly static int cellSize = 8;
-
-    private SpatialGrid<AvoidanceAgentData> spatialGrid;
-
-    [BurstCompile]
-    public void OnCreate(ref SystemState state)
-    {
-        spatialGrid = new SpatialGrid<AvoidanceAgentData>(mapSize, cellSize, 100000, Allocator.Persistent);
-    }
+    // Tunable parameters
+    const float AvoidanceHorizon = 2.0f;      // How far ahead to look (seconds)
+    const float SeparationWeight = 1.2f;      // Personal space multiplier
+    const float VelocitySmoothing = 0.3f;     // How quickly to adapt to new velocities
+    const int VelocitySamples = 16;           // Number of directions to sample
+    const float TimeStep = 0.1f;              // Fixed timestep (matches your FixedStepSimulationSystemGroup)
 
     [BurstCompile]
-    public void OnDestroy(ref SystemState state)
-    {
-        spatialGrid.Dispose();
-    }
+    public void OnCreate(ref SystemState state) { }
+
+    [BurstCompile]
+    public void OnDestroy(ref SystemState state) { }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        // Step 1: Reset grid
-        var resetJob = new SpatialGrid<AvoidanceAgentData>.ResetPrefixSum()
+        // Gather all agents into arrays for processing
+        var agentQuery = SystemAPI.QueryBuilder()
+            .WithAll<SimLocalTransform, AgentComponent, AvoidanceVelocity, MaxSpeedComponent, DesiredVelocity>()
+            .Build();
+
+        int agentCount = agentQuery.CalculateEntityCount();
+        if (agentCount == 0) return;
+
+        var positions = new NativeArray<float2>(agentCount, Allocator.TempJob);
+        var velocities = new NativeArray<float2>(agentCount, Allocator.TempJob);
+        var desiredVelocities = new NativeArray<float2>(agentCount, Allocator.TempJob);
+        var forwards = new NativeArray<float2>(agentCount, Allocator.TempJob);
+        var radii = new NativeArray<float>(agentCount, Allocator.TempJob);
+        var lengths = new NativeArray<float>(agentCount, Allocator.TempJob);
+        var maxSpeeds = new NativeArray<float>(agentCount, Allocator.TempJob);
+        var priorities = new NativeArray<int>(agentCount, Allocator.TempJob);
+        var newVelocities = new NativeArray<float2>(agentCount, Allocator.TempJob);
+
+        // Job 1: Gather agent data
+        var gatherJob = new GatherAgentDataJob
         {
-            activeCells = spatialGrid.activeCells,
-            cellCounts = spatialGrid.cellCounts,
+            Positions = positions,
+            Velocities = velocities,
+            DesiredVelocities = desiredVelocities,
+            Forwards = forwards,
+            Radii = radii,
+            Lengths = lengths,
+            MaxSpeeds = maxSpeeds,
+            Priorities = priorities,
         };
 
-        // Step 2: Calculate cell counts
-        var calculateCountsJob = new CalculateAvoidanceCellCounts()
+        // Job 2: Calculate avoidance velocities
+        var avoidanceJob = new CalculateAvoidanceJob
         {
-            gridProperties = spatialGrid.gridProperties,
-            cellCounts = spatialGrid.cellCounts,
+            Positions = positions,
+            Velocities = velocities,
+            DesiredVelocities = desiredVelocities,
+            Forwards = forwards,
+            Radii = radii,
+            Lengths = lengths,
+            MaxSpeeds = maxSpeeds,
+            Priorities = priorities,
+            NewVelocities = newVelocities,
+            AvoidanceHorizon = AvoidanceHorizon,
+            SeparationWeight = SeparationWeight,
+            VelocitySamples = VelocitySamples,
         };
 
-        // Step 3: Calculate cell offsets
-        var calculateOffsetsJob = new SpatialGrid<AvoidanceAgentData>.CalculateCellOffsets()
+        // Job 3: Apply avoidance velocities
+        var applyJob = new ApplyAvoidanceJob
         {
-            activeCells = spatialGrid.activeCells,
-            cellCounts = spatialGrid.cellCounts,
-            cellOffsets = spatialGrid.cellOffsets,
+            NewVelocities = newVelocities,
+            VelocitySmoothing = VelocitySmoothing,
+            TimeStep = TimeStep,
         };
 
-        // Step 4: Populate grid with agent data
-        var populateGridJob = new PopulateAvoidanceGridData()
-        {
-            gridProperties = spatialGrid.gridProperties,
-            cellOffsets = spatialGrid.cellOffsets,
-            spatialData = spatialGrid.cellData,
-        };
-
-        // Step 5: Process avoidance
-        var processAvoidanceJob = new ProcessAvoidance()
-        {
-            activeCells = spatialGrid.activeCells.AsDeferredJobArray(),
-            gridProperties = spatialGrid.gridProperties,
-            cellCounts = spatialGrid.cellCounts,
-            cellOffsets = spatialGrid.cellOffsets,
-            spatialData = spatialGrid.cellData,
-            TimeStep = 0.1f,
-            AvoidanceHorizon = 2.0f,
-            SeparationWeight = 1.5f,
-        };
-
-        // Step 6: Apply avoidance velocities
-        var applyAvoidanceJob = new ApplyAvoidanceVelocities()
-        {
-            spatialData = spatialGrid.cellData,
-            DeltaTime = 0.1f,
-        };
-
-        state.Dependency = resetJob.Schedule(state.Dependency);
-        state.Dependency = calculateCountsJob.ScheduleParallel(state.Dependency);
-        state.Dependency = calculateOffsetsJob.Schedule(state.Dependency);
-        state.Dependency = populateGridJob.ScheduleParallel(state.Dependency);
-        state.Dependency = processAvoidanceJob.Schedule(spatialGrid.activeCells, 1, state.Dependency);
-        state.Dependency = applyAvoidanceJob.ScheduleParallel(state.Dependency);
-
+        state.Dependency = gatherJob.ScheduleParallel(state.Dependency);
+        state.Dependency = avoidanceJob.Schedule(agentCount, 32, state.Dependency);
+        state.Dependency = applyJob.ScheduleParallel(state.Dependency);
         state.Dependency.Complete();
-    }
 
-    public struct AvoidanceAgentData
-    {
-        public float2 Position;
-        public float2 Velocity;
-        public float2 DesiredVelocity;
-        public float2 Forward;
-        //public float Length;
-        public float Radius;
-        public float MaxSpeed;
-        public int Priority;
-
-        public float2 AvoidanceVelocity;
-        public int AvoidanceCount;
-
-        public void GetMinMax(out float2 min, out float2 max)
-        {
-            //var p1 = Position - Forward * Length * 0.5f;
-            //var p2 = Position + Forward * Length * 0.5f;
-            var p1 = Position;
-            var p2 = Position;
-            min = math.min(p1 - Radius, p2 - Radius);
-            max = math.max(p1 + Radius, p2 + Radius);
-        }
+        // Cleanup
+        positions.Dispose();
+        velocities.Dispose();
+        desiredVelocities.Dispose();
+        forwards.Dispose();
+        radii.Dispose();
+        lengths.Dispose();
+        maxSpeeds.Dispose();
+        priorities.Dispose();
+        newVelocities.Dispose();
     }
 
     [BurstCompile]
-    public partial struct CalculateAvoidanceCellCounts : IJobEntity
+    partial struct GatherAgentDataJob : IJobEntity
     {
-        [ReadOnly] public SpatialGridProperties gridProperties;
+        [WriteOnly] public NativeArray<float2> Positions;
+        [WriteOnly] public NativeArray<float2> Velocities;
+        [WriteOnly] public NativeArray<float2> DesiredVelocities;
+        [WriteOnly] public NativeArray<float2> Forwards;
+        [WriteOnly] public NativeArray<float> Radii;
+        [WriteOnly] public NativeArray<float> Lengths;
+        [WriteOnly] public NativeArray<float> MaxSpeeds;
+        [WriteOnly] public NativeArray<int> Priorities;
 
-        [NativeDisableParallelForRestriction]
-        [WriteOnly] public NativeArray<int> cellCounts;
-
-        public void Execute(in SimLocalTransform simTransform, ref AgentComponent agent, in AvoidanceVelocity avoidVel)
-        {
-            // Calculate agent bounds for spatial grid
-            float2 pos = simTransform.Value.Position.xz;
-            float2 forward = math.normalize(simTransform.Value.Forward().xz);
-
-            float2 agentMin, agentMax;
-            agent.GetMinMax(pos, forward, out agentMin, out agentMax);
-
-            // Expand bounds by avoidance horizon
-            float lookAheadDist = 2.0f;
-            agentMin -= lookAheadDist;
-            agentMax += lookAheadDist;
-
-            var minCell = gridProperties.GetCellKeyClamped(agentMin);
-            var maxCell = gridProperties.GetCellKeyClamped(agentMax);
-
-            agent.Indicies.Clear();
-
-            for (int y = minCell.y; y <= maxCell.y; y++)
-            {
-                for (int x = minCell.x; x <= maxCell.x; x++)
-                {
-                    var cellIndex = gridProperties.GetCellIndex(new int2(x, y));
-
-                    unsafe
-                    {
-                        System.Threading.Interlocked.Increment(ref UnsafeUtility.ArrayElementAsRef<int>(cellCounts.GetUnsafePtr(), cellIndex));
-                        agent.Indicies.Add(cellIndex);
-                    }
-                }
-            }
-        }
-    }
-
-    [BurstCompile]
-    public partial struct PopulateAvoidanceGridData : IJobEntity
-    {
-        [ReadOnly] public SpatialGridProperties gridProperties;
-        [ReadOnly] public NativeArray<int> cellOffsets;
-
-        [NativeDisableParallelForRestriction]
-        [WriteOnly] public NativeArray<AvoidanceAgentData> spatialData;
-
-        public void Execute(
+        void Execute(
+            [EntityIndexInQuery] int index,
             in SimLocalTransform simTransform,
             in AgentComponent agent,
             in AvoidanceVelocity avoidVel,
             in MaxSpeedComponent maxSpeed,
             in DesiredVelocity desiredVel)
         {
-            float2 pos = simTransform.Value.Position.xz;
-            float2 forward = math.normalize(simTransform.Value.Forward().xz);
-
-            var agentData = new AvoidanceAgentData
-            {
-                Position = pos,
-                Velocity = avoidVel.Value,
-                DesiredVelocity = desiredVel.Value,
-                Forward = forward,
-                //Length = agent.Length,
-                Radius = agent.Radius + agent.Length * 0.5f,
-                MaxSpeed = maxSpeed.Value,
-                Priority = agent.AvoidancePriority,
-                AvoidanceVelocity = float2.zero,
-                AvoidanceCount = 0,
-            };
-
-            // Calculate bounds with avoidance horizon
-            float2 agentMin, agentMax;
-            agent.GetMinMax(pos, forward, out agentMin, out agentMax);
-
-            float lookAheadDist = 2.0f;
-            agentMin -= lookAheadDist;
-            agentMax += lookAheadDist;
-
-            var minCell = gridProperties.GetCellKeyClamped(agentMin);
-            var maxCell = gridProperties.GetCellKeyClamped(agentMax);
-
-            int i = 0;
-
-            for (int y = minCell.y; y <= maxCell.y; y++)
-            {
-                for (int x = minCell.x; x <= maxCell.x; x++)
-                {
-                    var cellIndex = gridProperties.GetCellIndex(new int2(x, y));
-                    var cellOffset = cellOffsets[cellIndex];
-
-                    unsafe
-                    {
-                        var localIndex = agent.Indicies[i++];
-
-                        var index = cellOffset + cellOffset;
-
-                        //var index = System.Threading.Interlocked.Increment(ref UnsafeUtility.ArrayElementAsRef<int>(cellOffsets.GetUnsafePtr(), cellIndex)) - 1;
-                        spatialData[index] = agentData;
-                    }
-                }
-            }
+            Positions[index] = simTransform.Value.Position.xz;
+            Velocities[index] = avoidVel.Value;
+            DesiredVelocities[index] = desiredVel.Value;
+            Forwards[index] = math.normalize(simTransform.Value.Forward().xz);
+            Radii[index] = agent.Radius + agent.Length * 0.5f;
+            Lengths[index] = agent.Length;
+            MaxSpeeds[index] = maxSpeed.Value;
+            Priorities[index] = agent.AvoidancePriority;
         }
     }
 
     [BurstCompile]
-    public struct ProcessAvoidance : IJobParallelForDefer
+    struct CalculateAvoidanceJob : IJobParallelFor
     {
-        public SpatialGridProperties gridProperties;
-        public float TimeStep;
+        [ReadOnly] public NativeArray<float2> Positions;
+        [ReadOnly] public NativeArray<float2> Velocities;
+        [ReadOnly] public NativeArray<float2> DesiredVelocities;
+        [ReadOnly] public NativeArray<float2> Forwards;
+        [ReadOnly] public NativeArray<float> Radii;
+        [ReadOnly] public NativeArray<float> Lengths;
+        [ReadOnly] public NativeArray<float> MaxSpeeds;
+        [ReadOnly] public NativeArray<int> Priorities;
+
+        [WriteOnly] public NativeArray<float2> NewVelocities;
+
         public float AvoidanceHorizon;
         public float SeparationWeight;
+        public int VelocitySamples;
 
-        [ReadOnly] public NativeArray<int> cellCounts;
-        [ReadOnly] public NativeArray<int> cellOffsets;
-        [ReadOnly] public NativeArray<int> activeCells;
-
-        [NativeDisableParallelForRestriction]
-        public NativeArray<AvoidanceAgentData> spatialData;
-
-        public void Execute(int index)
+        public void Execute(int i)
         {
-            var cellIndex = activeCells[index];
-            var data = spatialData.GetSubArray(cellOffsets[cellIndex], cellCounts[cellIndex]);
+            float2 position = Positions[i];
+            float2 currentVel = Velocities[i];
+            float2 desiredVel = DesiredVelocities[i];
+            float maxSpeed = MaxSpeeds[i];
+            float radius = Radii[i];
+            int priority = Priorities[i];
 
-            for (int i = 0; i < data.Length; i++)
+            // Start with desired velocity as best candidate
+            float2 bestVelocity = desiredVel;
+            float bestCost = CalculateVelocityCost(i, desiredVel);
+
+            // Sample velocities in a circular pattern
+            float angleStep = math.PI * 2.0f / VelocitySamples;
+
+            for (int s = 0; s < VelocitySamples; s++)
             {
-                unsafe
+                float angle = angleStep * s;
+                float2 dir = new float2(math.cos(angle), math.sin(angle));
+
+                // Try multiple speeds: 50%, 75%, 100%
+                for (float speedMult = 0.5f; speedMult <= 1.0f; speedMult += 0.25f)
                 {
-                    ref var agentA = ref UnsafeUtility.ArrayElementAsRef<AvoidanceAgentData>(data.GetUnsafePtr(), i);
+                    float2 testVel = dir * maxSpeed * speedMult;
+                    float cost = CalculateVelocityCost(i, testVel);
 
-                    // Calculate avoidance velocity by sampling preferred velocities
-                    float2 bestVelocity = agentA.DesiredVelocity;
-                    float bestCost = CalculateVelocityCost(ref agentA, bestVelocity, data.AsReadOnly(), i);
-
-                    // Sample velocities in a circular pattern
-                    int samples = 12;
-                    float angleStep = math.PI * 2.0f / samples;
-
-                    for (int s = 0; s < samples; s++)
+                    if (cost < bestCost)
                     {
-                        float angle = angleStep * s;
-                        float2 dir = new float2(math.cos(angle), math.sin(angle));
-
-                        // Try multiple speeds
-                        for (float speedMult = 0.5f; speedMult <= 1.0f; speedMult += 0.25f)
-                        {
-                            float2 testVel = dir * agentA.MaxSpeed * speedMult;
-                            float cost = CalculateVelocityCost(ref agentA, testVel, data.AsReadOnly(), i);
-
-                            if (cost < bestCost)
-                            {
-                                bestCost = cost;
-                                bestVelocity = testVel;
-                            }
-                        }
+                        bestCost = cost;
+                        bestVelocity = testVel;
                     }
-
-                    agentA.AvoidanceVelocity = bestVelocity;
-                    agentA.AvoidanceCount = 1;
                 }
             }
+
+            // Also try standing still if things are crowded
+            float stillCost = CalculateVelocityCost(i, float2.zero);
+            if (stillCost < bestCost)
+            {
+                bestVelocity = float2.zero;
+            }
+
+            NewVelocities[i] = bestVelocity;
         }
 
-        private float CalculateVelocityCost(
-            ref AvoidanceAgentData agentA,
-            float2 testVelocity,
-            NativeArray<AvoidanceAgentData>.ReadOnly data,
-            int skipIndex)
+        float CalculateVelocityCost(int agentIndex, float2 testVelocity)
         {
+            float2 position = Positions[agentIndex];
+            float radius = Radii[agentIndex];
+            float2 desiredVel = DesiredVelocities[agentIndex];
+            int priority = Priorities[agentIndex];
+
             float cost = 0f;
 
-            // Cost for deviating from desired velocity
-            float2 desiredDiff = testVelocity - agentA.DesiredVelocity;
-            cost += math.lengthsq(desiredDiff) * 0.5f;
+            // Cost 1: Deviation from desired velocity
+            float2 desiredDiff = testVelocity - desiredVel;
+            cost += math.lengthsq(desiredDiff) * 1.0f;
 
-            // Check collisions with other agents
-            for (int j = 0; j < data.Length; j++)
+            // Cost 2: Check collisions with all other agents
+            for (int j = 0; j < Positions.Length; j++)
             {
-                if (j == skipIndex) continue;
+                if (j == agentIndex) continue;
 
-                var agentB = data[j];
+                float2 otherPos = Positions[j];
+                float2 otherVel = Velocities[j];
+                float otherRadius = Radii[j];
+                int otherPriority = Priorities[j];
 
-                // Skip if too far away
-                float2 relPos = agentB.Position - agentA.Position;
+                // Quick distance check
+                float2 relPos = otherPos - position;
                 float distSq = math.lengthsq(relPos);
 
-                float maxDist = AvoidanceHorizon + agentA.Radius + agentB.Radius;
+                float maxDist = AvoidanceHorizon * math.max(MaxSpeeds[agentIndex], MaxSpeeds[j]) + radius + otherRadius;
                 if (distSq > maxDist * maxDist)
                     continue;
 
-                // Predict future collision using velocity obstacles
-                float2 relVel = testVelocity - agentB.Velocity;
+                // Predict collision using relative velocity
+                float2 relVel = testVelocity - otherVel;
+                float relSpeed = math.length(relVel);
+
+                if (relSpeed < 0.001f)
+                {
+                    // Agents moving together - only penalize if too close
+                    float dist = math.sqrt(distSq);
+                    float minSeparation2 = (radius + otherRadius) * SeparationWeight;
+
+                    if (dist < minSeparation2)
+                    {
+                        float penetration = minSeparation2 - dist;
+                        cost += penetration * penetration * 100.0f;
+                    }
+                    continue;
+                }
 
                 // Time to closest approach
-                float timeToCollision = -math.dot(relPos, relVel) / (math.lengthsq(relVel) + 0.001f);
-                timeToCollision = math.clamp(timeToCollision, 0f, AvoidanceHorizon);
+                float timeToClosest = -math.dot(relPos, relVel) / (relSpeed * relSpeed);
+                timeToClosest = math.clamp(timeToClosest, 0f, AvoidanceHorizon);
 
-                // Future positions
-                float2 futureA = agentA.Position + testVelocity * timeToCollision;
-                float2 futureB = agentB.Position + agentB.Velocity * timeToCollision;
-
-                float2 futureDist = futureA - futureB;
+                // Predicted future positions
+                float2 futurePos = position + testVelocity * timeToClosest;
+                float2 futureOther = otherPos + otherVel * timeToClosest;
+                float2 futureDist = futurePos - futureOther;
                 float futureDistMag = math.length(futureDist);
 
-                float minSeparation = (agentA.Radius + agentB.Radius) * SeparationWeight;
+                float minSeparation = (radius + otherRadius) * SeparationWeight;
 
                 if (futureDistMag < minSeparation)
                 {
-                    // Collision detected - add penalty
+                    // Collision predicted!
                     float penetration = minSeparation - futureDistMag;
 
-                    // Higher penalty for earlier collisions
-                    float timeFactor = math.max(0.1f, 1.0f - timeToCollision / AvoidanceHorizon);
+                    // Earlier collisions are worse
+                    float urgency = 1.0f / (timeToClosest + 0.1f);
 
-                    // Priority affects who should avoid more
-                    float priorityFactor = ComputeAvoidanceFactor(agentA.Priority, agentB.Priority);
+                    // Priority: lower priority agents should avoid more
+                    float priorityFactor = ComputeAvoidanceFactor(priority, otherPriority);
 
-                    cost += penetration * timeFactor * priorityFactor * 50.0f;
+                    cost += penetration * urgency * priorityFactor * 100.0f;
                 }
             }
 
             return cost;
         }
 
-        private static float ComputeAvoidanceFactor(int priA, int priB)
+        float ComputeAvoidanceFactor(int myPriority, int otherPriority)
         {
-            // Lower priority agents avoid more
-            float wA = 1f / (1f + priA);
-            float wB = 1f / (1f + priB);
-            float sum = wA + wB;
-            return sum > 0f ? (wA / sum) * 2.0f : 1.0f;
+            // 0 = highest priority (should avoid less)
+            // 99 = lowest priority (should avoid more)
+            // Returns a multiplier: higher = I should avoid more
+
+            float myWeight = 1f / (1f + myPriority);
+            float otherWeight = 1f / (1f + otherPriority);
+            float sum = myWeight + otherWeight;
+
+            if (sum < 0.001f) return 1.0f;
+
+            // My share of the avoidance burden (0.0 to 2.0, typically around 1.0)
+            return (myWeight / sum) * 2.0f;
         }
     }
 
     [BurstCompile]
-    public partial struct ApplyAvoidanceVelocities : IJobEntity
+    partial struct ApplyAvoidanceJob : IJobEntity
     {
-        [ReadOnly] public NativeArray<AvoidanceAgentData> spatialData;
-        public float DeltaTime;
+        [ReadOnly] public NativeArray<float2> NewVelocities;
+        public float VelocitySmoothing;
+        public float TimeStep;
 
-        public void Execute(
+        void Execute(
+            [EntityIndexInQuery] int index,
             ref SimLocalTransform simTransform,
             ref AvoidanceVelocity avoidVel,
-            ref DesiredVelocity desiredVel,
-            ref AgentComponent agent)
+            ref DesiredVelocity desiredVel)
         {
-            // Find our data in the spatial grid
-            float2 computedVelocity = desiredVel.Value;
+            float2 computedVelocity = NewVelocities[index];
 
-            // Average all instances (should typically be just one per cell overlap)
-            for (int i = 0; i < agent.Indicies.Length; i++)
-            {
-                var data = spatialData[agent.Indicies[i]];
-                if (data.AvoidanceCount > 0)
-                {
-                    computedVelocity = data.AvoidanceVelocity;
-                    break;
-                }
-            }
+            // Smooth the velocity change to prevent jitter
+            avoidVel.Value = math.lerp(avoidVel.Value, computedVelocity, VelocitySmoothing);
 
-            // Smooth the avoidance velocity for stability
-            float smoothing = 0.3f;
-            avoidVel.Value = math.lerp(avoidVel.Value, computedVelocity, smoothing);
-
-            // Update desired velocity to the smoothed avoidance velocity
+            // Update desired velocity to match avoidance velocity
             desiredVel.Value = avoidVel.Value;
 
-            // Update position
+            // Apply movement
             float3 velocity3D = new float3(avoidVel.Value.x, 0, avoidVel.Value.y);
-            simTransform.Value.Position += velocity3D * DeltaTime;
+            simTransform.Value.Position += velocity3D * TimeStep;
 
             // Update rotation to face movement direction
             if (math.lengthsq(avoidVel.Value) > 0.01f)
@@ -406,8 +329,6 @@ public partial struct AvoidanceSystem : ISystem
                 float angle = math.atan2(forward.x, forward.y);
                 simTransform.Value.Rotation = quaternion.RotateY(angle);
             }
-
-            agent.Indicies.Clear();
         }
     }
 }
