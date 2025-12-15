@@ -724,7 +724,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1772793228
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -740,11 +740,11 @@ MonoBehaviour:
   A: {fileID: 1647997677}
   radiusA: 0.37
   lengthA: 0.71
-  velocityA: {x: -2.1, y: 0}
+  velocityA: {x: -0.64, y: -2.23}
   B: {fileID: 523315143}
   radiusB: 0.5
   lengthB: 1.16
-  velocityB: {x: -2, y: 0}
+  velocityB: {x: -2.4, y: 0}
   horizonSeconds: 1
   extraSeparation: 0.05
   maxDeltaSpeed: 10
@@ -767,6 +767,70 @@ Transform:
   - {fileID: 523315143}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1870139325
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1870139327}
+  - component: {fileID: 1870139326}
+  m_Layer: 0
+  m_Name: GameObject (3)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1870139326
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1870139325}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 82fa696c18083c140bf2b5ddbd422c07, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  agentCount: 30
+  spawnRadius: 12
+  randomSeed: 1
+  radius: 0.19
+  length: 0.82
+  varySizes: 1
+  speed: 1.64
+  seekCenter: 0
+  bounceBounds: 0
+  boundsHalfExtents: {x: 10, y: 6}
+  horizonSeconds: 1
+  extraSeparation: 0.05
+  maxDeltaSpeed: 10
+  minResponseTime: 0.05
+  iterations: 3
+  preserveSpeed: 1
+  drawCapsules: 1
+  drawVelocities: 1
+  drawPredictedPositions: 0
+  drawPairDebugForAgent: -1
+--- !u!4 &1870139327
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1870139325}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -778,3 +842,4 @@ SceneRoots:
   - {fileID: 246812469}
   - {fileID: 1112428696}
   - {fileID: 1772793229}
+  - {fileID: 1870139327}
