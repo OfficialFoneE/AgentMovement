@@ -249,15 +249,6 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
             if (bounceBounds)
                 BounceInBounds(ref a, _worldCenter, boundsHalfExtents);
-
-            if (a.velocity.sqrMagnitude > 1e-6f)
-            {
-                Vector2 velDir = a.velocity.normalized;
-                a.facing = RotateTowards2D(a.facing, velDir, maxTurnDegPerSec * Mathf.Deg2Rad * dt);
-            }
-
-            //float vsq = a.velocity.sqrMagnitude;
-            //if (vsq > 1e-6f) a.facing = a.velocity / Mathf.Sqrt(vsq);
         }
     }
 
@@ -423,7 +414,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
     private void InitLocomotion(ref Agent a, Vector2 initialMoveDir)
     {
         // Randomize “type”: 50% car-like, 50% hover-like (tweak however you want)
-        bool isCar = Random.value < 0.5f;
+        bool isCar = false;//Random.value < 0.5f;
         a.axisFreedom = isCar ? 0f : 1f;
 
         a.moveAxis = (initialMoveDir.sqrMagnitude > 1e-6f) ? initialMoveDir.normalized : Vector2.right;
