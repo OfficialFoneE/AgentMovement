@@ -47,6 +47,9 @@ public class PillVOScenarioTester2D : MonoBehaviour
     [Range(0f, 1f)] public float realignStrength = 0.65f;
     public bool preserveSpeed = true;
 
+    [Header("Speed Hold (replaces hard preserveSpeed normalize)")]
+    [Range(0f, 1f)] public float speedHoldWhenMisaligned = 0.15f; // 0..1, how much speed we keep when moving opposite desired
+
     [Header("Capsule Orientation Stability")]
     public float maxTurnDegPerSec = 360f;   // try 180..720
 
@@ -258,10 +261,108 @@ public class PillVOScenarioTester2D : MonoBehaviour
         }
     }
 
-    private static Vector2 SafeNormal(Vector2 v)
+    private void ProjectLocomotion(ref Agent a, Vector2 vCmd, Vector2 desiredVel, float dt)
     {
-        float sq = v.sqrMagnitude;
-        return sq > 1e-8f ? v / Mathf.Sqrt(sq) : Vector2.right;
+        float maxTurnRad = maxTurnDegPerSec * Mathf.Deg2Rad * dt;
+        float maxDv = maxAccel * dt;
+
+        // --- 1) Update moveAxis (car limited, hover near-free) ---
+        Vector2 axisDesired =
+            (vCmd.sqrMagnitude > 1e-6f) ? vCmd :
+            (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
+            a.moveAxis;
+
+        axisDesired = SafeNormal(axisDesired);
+
+        // axisFreedom=0 -> limited turn, axisFreedom=1 -> almost snap
+        float axisTurn = Mathf.Lerp(maxTurnRad, Mathf.PI, Mathf.Clamp01(a.axisFreedom));
+        a.moveAxis = RotateTowards2D(a.moveAxis, axisDesired, axisTurn);
+
+        // --- 2) Accel constrain: car only changes along moveAxis, hover changes in any direction ---
+        Vector2 v = a.velocity;
+        Vector2 dv = vCmd - v;
+
+        Vector2 axis = SafeNormal(a.moveAxis);
+        Vector2 dvParallel = Vector2.Dot(dv, axis) * axis;
+        Vector2 dvPerp = dv - dvParallel;
+
+        // allow lateral accel proportionally to axisFreedom
+        Vector2 dvAllowed = dvParallel + dvPerp * Mathf.Clamp01(a.axisFreedom);
+
+        // overall accel clamp
+        float dvmag = dvAllowed.magnitude;
+        if (dvmag > maxDv && dvmag > 1e-6f) dvAllowed *= (maxDv / dvmag);
+
+        v += dvAllowed;
+
+        // speed clamp
+        float vmag = v.magnitude;
+        if (vmag > speed && vmag > 1e-6f) v = (v / vmag) * speed;
+
+        if (preserveSpeed)
+        {
+            float desiredSpeed = desiredVel.magnitude;
+            if (desiredSpeed > 1e-6f)
+            {
+                Vector2 desiredDir = desiredVel / desiredSpeed;
+
+                float curSpeed = v.magnitude;
+                Vector2 curDir = (curSpeed > 1e-6f) ? (v / curSpeed) : desiredDir;
+
+                // Alignment: -1 opposite, +1 same.
+                float align = Vector2.Dot(curDir, desiredDir);
+
+                // When badly misaligned, we intentionally allow speed to drop so the agent can turn.
+                // align=-1 -> keep speedHoldWhenMisaligned * desiredSpeed
+                // align=+1 -> keep 1.0 * desiredSpeed
+                float t = Mathf.Clamp01((align + 1f) * 0.5f);
+                float targetSpeed = Mathf.Lerp(speedHoldWhenMisaligned * desiredSpeed, desiredSpeed, t);
+
+                // Move speed toward targetSpeed with accel budget (no instant normalize).
+                float ds = targetSpeed - curSpeed;
+                float dsStep = Mathf.Clamp(ds, -maxDv, maxDv);
+
+                // Apply along current motion direction (or desiredDir if stopped)
+                v += curDir * dsStep;
+
+                // Re-clamp after adjusting speed
+                float vmag2 = v.magnitude;
+                if (vmag2 > speed && vmag2 > 1e-6f) v = (v / vmag2) * speed;
+            }
+        }
+
+        a.velocity = v;
+
+        // --- 3) Update facing according to facingMode ---
+        Vector2 faceDesired = a.facing;
+
+        switch (a.facingMode)
+        {
+            case FacingMode.LinkedToMoveAxis:
+                faceDesired = a.moveAxis;
+                break;
+
+            case FacingMode.ToVelocity:
+                faceDesired = (a.velocity.sqrMagnitude > 1e-6f) ? a.velocity : a.moveAxis;
+                break;
+
+            case FacingMode.ToDestination:
+                faceDesired = (a.target - a.position);
+                if (faceDesired.sqrMagnitude < 1e-6f) faceDesired = a.moveAxis;
+                break;
+
+            case FacingMode.ToPoint:
+                faceDesired = (a.aimPoint - a.position);
+                if (faceDesired.sqrMagnitude < 1e-6f) faceDesired = a.moveAxis;
+                break;
+        }
+
+        // Face turn: cars already link to moveAxis; hovers turn visually at the same limit (fine for tester)
+        a.facing = RotateTowards2D(a.facing, SafeNormal(faceDesired), maxTurnRad);
+
+        // Ensure car stays linked perfectly (optional, but makes it crisp)
+        if (a.facingMode == FacingMode.LinkedToMoveAxis)
+            a.facing = a.moveAxis;
     }
 
     void OnDrawGizmos()
@@ -309,6 +410,13 @@ public class PillVOScenarioTester2D : MonoBehaviour
             }
         }
     }
+
+    private static Vector2 SafeNormal(Vector2 v)
+    {
+        float sq = v.sqrMagnitude;
+        return sq > 1e-8f ? v / Mathf.Sqrt(sq) : Vector2.right;
+    }
+
 
     // ---------------- Scenario Spawning ----------------
 
@@ -522,87 +630,6 @@ public class PillVOScenarioTester2D : MonoBehaviour
         }
     }
 
-    private void ProjectLocomotion(ref Agent a, Vector2 vCmd, Vector2 desiredVel, float dt)
-    {
-        float maxTurnRad = maxTurnDegPerSec * Mathf.Deg2Rad * dt;
-        float maxDv = maxAccel * dt;
-
-        // --- 1) Update moveAxis (car limited, hover near-free) ---
-        Vector2 axisDesired =
-            (vCmd.sqrMagnitude > 1e-6f) ? vCmd :
-            (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
-            a.moveAxis;
-
-        axisDesired = SafeNormal(axisDesired);
-
-        // axisFreedom=0 -> limited turn, axisFreedom=1 -> almost snap
-        float axisTurn = Mathf.Lerp(maxTurnRad, Mathf.PI, Mathf.Clamp01(a.axisFreedom));
-        a.moveAxis = RotateTowards2D(a.moveAxis, axisDesired, axisTurn);
-
-        // --- 2) Accel constrain: car only changes along moveAxis, hover changes in any direction ---
-        Vector2 v = a.velocity;
-        Vector2 dv = vCmd - v;
-
-        Vector2 axis = SafeNormal(a.moveAxis);
-        Vector2 dvParallel = Vector2.Dot(dv, axis) * axis;
-        Vector2 dvPerp = dv - dvParallel;
-
-        // allow lateral accel proportionally to axisFreedom
-        Vector2 dvAllowed = dvParallel + dvPerp * Mathf.Clamp01(a.axisFreedom);
-
-        // overall accel clamp
-        float dvmag = dvAllowed.magnitude;
-        if (dvmag > maxDv && dvmag > 1e-6f) dvAllowed *= (maxDv / dvmag);
-
-        v += dvAllowed;
-
-        // speed clamp
-        float vmag = v.magnitude;
-        if (vmag > speed && vmag > 1e-6f) v = (v / vmag) * speed;
-
-        // optional preserveSpeed (preserve desired speed if nonzero)
-        if (preserveSpeed)
-        {
-            float targetSpeed = desiredVel.magnitude;
-            if (targetSpeed > 1e-6f && v.sqrMagnitude > 1e-8f)
-                v = SafeNormal(v) * targetSpeed;
-        }
-
-        a.velocity = v;
-
-        // --- 3) Update facing according to facingMode ---
-        Vector2 faceDesired = a.facing;
-
-        switch (a.facingMode)
-        {
-            case FacingMode.LinkedToMoveAxis:
-                faceDesired = a.moveAxis;
-                break;
-
-            case FacingMode.ToVelocity:
-                faceDesired = (a.velocity.sqrMagnitude > 1e-6f) ? a.velocity : a.moveAxis;
-                break;
-
-            case FacingMode.ToDestination:
-                faceDesired = (a.target - a.position);
-                if (faceDesired.sqrMagnitude < 1e-6f) faceDesired = a.moveAxis;
-                break;
-
-            case FacingMode.ToPoint:
-                faceDesired = (a.aimPoint - a.position);
-                if (faceDesired.sqrMagnitude < 1e-6f) faceDesired = a.moveAxis;
-                break;
-        }
-
-        // Face turn: cars already link to moveAxis; hovers turn visually at the same limit (fine for tester)
-        a.facing = RotateTowards2D(a.facing, SafeNormal(faceDesired), maxTurnRad);
-
-        // Ensure car stays linked perfectly (optional, but makes it crisp)
-        if (a.facingMode == FacingMode.LinkedToMoveAxis)
-            a.facing = a.moveAxis;
-    }
-
-
     // ---------------- Utility / Gizmos ----------------
 
     private static Vector2 RandomPointInBounds(Vector2 center, Vector2 halfExt)
@@ -626,8 +653,11 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
     private static Vector2 RotateTowards2D(Vector2 from, Vector2 to, float maxRadians)
     {
-        from = SafeNormal(from);
-        to = SafeNormal(to);
+        if (from.sqrMagnitude < 1e-8f) from = Vector2.right;
+        if (to.sqrMagnitude < 1e-8f) return from.normalized;
+
+        from.Normalize();
+        to.Normalize();
 
         float cross = from.x * to.y - from.y * to.x;
         float dot = Mathf.Clamp(Vector2.Dot(from, to), -1f, 1f);
