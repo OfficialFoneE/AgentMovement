@@ -129,53 +129,48 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
         float dt = Time.fixedDeltaTime;
         int iters = Mathf.Max(1, iterations);
-
-        // IMPORTANT: budgets must be per-iteration because ProjectLocomotion is called iters times.
         float dtIter = dt / iters;
+
+        // IMPORTANT: when you run projection iters times, budgets must be per-iter.
         float maxSteerDvIter = maxAccel * dtIter;
 
-        // 1) Desired velocity per agent
+        // 1) Desired velocities
         for (int i = 0; i < _agents.Length; i++)
         {
             ref Agent a = ref _agents[i];
 
-            // If you truly want "frozen", keep invMass<=0 as freeze.
-            // Otherwise invMass is pushability and should never be <=0.
             if (a.invMass <= 0f)
             {
                 _desiredVels[i] = Vector2.zero;
                 continue;
             }
 
-            // Idle group: settle to zero desired velocity (can still be pushed by others)
             if (scenario == Scenario.MovingClumpThroughIdleClump && a.group == 1)
             {
                 _desiredVels[i] = Vector2.zero;
                 continue;
             }
 
-            // Retarget if arrived
             Vector2 toT = a.target - a.position;
             if (toT.sqrMagnitude <= arriveRadius * arriveRadius)
                 PickNextTarget(ref a);
 
             toT = a.target - a.position;
 
-            // Fallback direction: use moveAxis (not facing) so locomotion stays consistent
-            Vector2 fallbackDir = (a.moveAxis.sqrMagnitude > 1e-6f) ? a.moveAxis : a.facing;
+            Vector2 fallbackDir = (a.facing.sqrMagnitude > 1e-6f) ? a.facing : a.moveAxis;
             Vector2 dir = (toT.sqrMagnitude > 1e-6f) ? toT.normalized : SafeNormal(fallbackDir);
 
             _desiredVels[i] = dir * speed;
         }
 
-        // 2) Iterative avoidance + goal steering + locomotion projection
+        // 2) Iterative avoidance + steer + projection
         Vector2[] deltaV = new Vector2[_agents.Length];
 
         for (int iter = 0; iter < iters; iter++)
         {
             System.Array.Clear(deltaV, 0, deltaV.Length);
 
-            // Pairwise avoidance
+            // Pairwise avoidance (multi-circle)
             for (int i = 0; i < _agents.Length; i++)
             {
                 for (int j = i + 1; j < _agents.Length; j++)
@@ -186,32 +181,18 @@ public class PillVOScenarioTester2D : MonoBehaviour
                     if (A.invMass <= 0f && B.invMass <= 0f)
                         continue;
 
-                    float spA = Mathf.Max(A.velocity.magnitude, 1e-4f);
-                    float spB = Mathf.Max(B.velocity.magnitude, 1e-4f);
+                    // Compute ONE correction vector for the whole capsule pair
+                    Vector2 full = ComputeAvoidanceCorrection_MultiCircle(
+                        A.position, A.velocity, SafeNormal(A.facing), A.halfLength, A.radius,
+                        B.position, B.velocity, SafeNormal(B.facing), B.halfLength, B.radius,
+                        horizonSeconds, extraSeparation, maxDeltaSpeed, minResponseTime);
 
-                    // Capsule axis comes from moveAxis (stable orientation)
-                    Vector2 vA_proxy = SafeNormal(A.moveAxis) * spA;
-                    Vector2 vB_proxy = SafeNormal(B.moveAxis) * spB;
-
-                    Pill2DVO.AvoidPair(
-                        new Pill2DVO.Capsule { center = A.position, velocity = vA_proxy, halfLength = A.halfLength, radius = A.radius },
-                        new Pill2DVO.Capsule { center = B.position, velocity = vB_proxy, halfLength = B.halfLength, radius = B.radius },
-                        horizonSeconds, extraSeparation, maxDeltaSpeed, minResponseTime,
-                        out Vector2 vA_proxyNew,
-                        out Vector2 vB_proxyNew,
-                        out _);
-
-                    // dv in proxy space
-                    Vector2 dA_half = vA_proxyNew - vA_proxy;
-                    Vector2 dB_half = vB_proxyNew - vB_proxy;
-
-                    Vector2 full = dB_half - dA_half;
-
+                    // Distribute by pushability (invMass is your pushability weight)
                     float wA = A.invMass;
                     float wB = B.invMass;
                     float wSum = wA + wB;
 
-                    if (wSum > 1e-6f)
+                    if (wSum > 1e-6f && full.sqrMagnitude > 1e-12f)
                     {
                         float shareA = wA / wSum;
                         float shareB = wB / wSum;
@@ -222,10 +203,11 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 }
             }
 
-            // Apply avoidance + steering + projection (per-iteration budgets)
+            // Apply avoidance + goal steering + locomotion projection
             for (int i = 0; i < _agents.Length; i++)
             {
                 ref Agent a = ref _agents[i];
+
                 if (a.invMass <= 0f)
                 {
                     a.velocity = Vector2.zero;
@@ -237,7 +219,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 // Command velocity
                 Vector2 vCmd = a.velocity + deltaV[i];
 
-                // Steer toward desired (accel-limited per iteration)
+                // Goal steering (per-iter accel budget)
                 Vector2 steer = desired - vCmd;
                 float smag = steer.magnitude;
                 if (smag > maxSteerDvIter && smag > 1e-6f)
@@ -245,7 +227,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
                 vCmd += steer * Mathf.Clamp01(realignStrength);
 
-                // Optional clamp
+                // Optional clamp for stability
                 float vmag = vCmd.magnitude;
                 if (vmag > speed && vmag > 1e-6f)
                     vCmd = (vCmd / vmag) * speed;
@@ -265,8 +247,8 @@ public class PillVOScenarioTester2D : MonoBehaviour
             if (bounceBounds)
                 BounceInBounds(ref a, _worldCenter, boundsHalfExtents);
 
-            // NOTE: Do NOT update a.facing here.
-            // Facing is controlled inside ProjectLocomotion via FacingMode.
+            // NOTE: do NOT overwrite a.facing here.
+            // Facing is managed ONLY inside ProjectLocomotion based on FacingMode.
         }
     }
 
@@ -275,19 +257,34 @@ public class PillVOScenarioTester2D : MonoBehaviour
         float maxTurnRad = maxTurnDegPerSec * Mathf.Deg2Rad * dt;
         float maxDv = maxAccel * dt;
 
+        float axisFreedom01 = Mathf.Clamp01(a.axisFreedom);
+
         // --- 1) Update moveAxis ---
-        Vector2 axisDesired =
-            (vCmd.sqrMagnitude > 1e-6f) ? vCmd :
-            (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
-            a.moveAxis;
+        // For car-like agents (axisFreedom ~ 0), aim the body axis toward the GOAL, not the command.
+        // This lets avoidance temporarily push velocity backwards without immediately flipping the body.
+        Vector2 axisDesired;
+
+        if (axisFreedom01 < 1e-3f)
+        {
+            axisDesired =
+                (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
+                (a.moveAxis.sqrMagnitude > 1e-6f) ? a.moveAxis :
+                vCmd;
+        }
+        else
+        {
+            axisDesired =
+                (vCmd.sqrMagnitude > 1e-6f) ? vCmd :
+                (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
+                a.moveAxis;
+        }
 
         axisDesired = SafeNormal(axisDesired);
 
-        float axisFreedom01 = Mathf.Clamp01(a.axisFreedom);
         float axisTurn = Mathf.Lerp(maxTurnRad, Mathf.PI, axisFreedom01);
         a.moveAxis = RotateTowards2D(a.moveAxis, axisDesired, axisTurn);
 
-        // --- 2) Accel constrain (car vs hover via axisFreedom) ---
+        // --- 2) Accel constrain: car only along moveAxis, hover full 2D ---
         Vector2 v = a.velocity;
         Vector2 dv = vCmd - v;
 
@@ -303,12 +300,12 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
         v += dvAllowed;
 
-        // speed clamp
+        // clamp max speed
         float vmag = v.magnitude;
         if (vmag > speed && vmag > 1e-6f)
             v = (v / vmag) * speed;
 
-        // Speed-hold controller (your improved preserveSpeed behavior)
+        // Speed hold controller (your improved preserveSpeed behavior)
         if (preserveSpeed)
         {
             float desiredSpeed = desiredVel.magnitude;
@@ -337,7 +334,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
         a.velocity = v;
 
-        // --- 3) Facing update (ONLY here) ---
+        // --- 3) Facing update (this defines BODY axis used by the physical collider) ---
         Vector2 faceDesired;
 
         switch (a.facingMode)
@@ -367,6 +364,126 @@ public class PillVOScenarioTester2D : MonoBehaviour
         if (a.facingMode == FacingMode.LinkedToMoveAxis)
             a.facing = a.moveAxis;
     }
+
+    private Vector2 ComputeAvoidanceCorrection_MultiCircle(
+    Vector2 cA, Vector2 vA, Vector2 axisA, float halfLenA, float rA,
+    Vector2 cB, Vector2 vB, Vector2 axisB, float halfLenB, float rB,
+    float horizon, float extraSep, float maxDelta, float minRespTime)
+    {
+        float R = (rA + rB + extraSep);
+
+        // Sample counts adapt to length vs radius (kept small for stability)
+        int nA = GetCircleSampleCount(halfLenA, rA);
+        int nB = GetCircleSampleCount(halfLenB, rB);
+
+        Vector2 vRel = vB - vA;
+
+        float bestDelta = 0f;
+        Vector2 bestN = Vector2.zero;
+
+        // Offsets along capsule axis from -halfLen..+halfLen
+        for (int ia = 0; ia < nA; ia++)
+        {
+            float ta = (nA == 1) ? 0.5f : (ia / (float)(nA - 1));
+            float offA = Mathf.Lerp(-halfLenA, +halfLenA, ta);
+            Vector2 pA = cA + axisA * offA;
+
+            for (int ib = 0; ib < nB; ib++)
+            {
+                float tb = (nB == 1) ? 0.5f : (ib / (float)(nB - 1));
+                float offB = Mathf.Lerp(-halfLenB, +halfLenB, tb);
+                Vector2 pB = cB + axisB * offB;
+
+                // Disc-disc VO check (returns required outward deltaSpeed along normal)
+                ComputeDiscAvoidance(pA, pB, vRel, R, horizon, minRespTime, out Vector2 n, out float delta);
+
+                if (delta > bestDelta)
+                {
+                    bestDelta = delta;
+                    bestN = n;
+                }
+            }
+        }
+
+        if (bestDelta <= 0f || bestN.sqrMagnitude < 1e-8f)
+            return Vector2.zero;
+
+        if (maxDelta > 0f)
+            bestDelta = Mathf.Min(bestDelta, maxDelta);
+
+        return bestN * bestDelta;
+    }
+
+    private static int GetCircleSampleCount(float halfLen, float radius)
+    {
+        // 3 for normal pills; 5 if noticeably longer. Clamp to stay cheap.
+        float fullLen = Mathf.Max(0f, halfLen) * 2f;
+        if (fullLen <= radius * 1.25f) return 3;
+        if (fullLen <= radius * 3.5f) return 5;
+        return 7;
+    }
+
+    private static void ComputeDiscAvoidance(
+    Vector2 pA, Vector2 pB,
+    Vector2 vRel,
+    float R,
+    float horizon,
+    float minRespTime,
+    out Vector2 n,
+    out float deltaSpeed)
+    {
+        Vector2 p = pB - pA;
+        float dist = p.magnitude;
+
+        // If already overlapping (or extremely close), push apart immediately.
+        if (dist < R)
+        {
+            n = (dist > 1e-6f) ? (p / dist) : Vector2.right;
+            float tau = Mathf.Max(minRespTime, 1e-4f);
+            deltaSpeed = (R - dist) / tau;
+            return;
+        }
+
+        float v2 = vRel.sqrMagnitude;
+        if (v2 < 1e-10f)
+        {
+            // Not moving relative to each other; no predicted collision if currently separated.
+            n = Vector2.zero;
+            deltaSpeed = 0f;
+            return;
+        }
+
+        // Time of closest approach in [0, horizon]
+        float t = -Vector2.Dot(p, vRel) / v2;
+        if (t <= 0f || t > horizon)
+        {
+            n = Vector2.zero;
+            deltaSpeed = 0f;
+            return;
+        }
+
+        Vector2 closest = p + vRel * t;
+        float d = closest.magnitude;
+
+        if (d >= R)
+        {
+            n = Vector2.zero;
+            deltaSpeed = 0f;
+            return;
+        }
+
+        // Need to increase separation along n over a response time tau
+        n = (d > 1e-6f) ? (closest / d) : SafePerp(SafeNormal(vRel));
+        float tau2 = Mathf.Max(minRespTime, t);
+
+        float vRelN = Vector2.Dot(vRel, n);
+        float requiredOut = (R - d) / tau2;
+
+        deltaSpeed = requiredOut - vRelN;
+        if (deltaSpeed < 0f) deltaSpeed = 0f;
+    }
+
+    private static Vector2 SafePerp(Vector2 v) => new Vector2(-v.y, v.x);
 
 
     void OnDrawGizmos()
