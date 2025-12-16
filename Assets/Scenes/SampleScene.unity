@@ -796,7 +796,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82fa696c18083c140bf2b5ddbd422c07, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  scenario: 2
+  scenario: 0
   randomSeed: 1
   agentCount: 30
   movingCount: 10
@@ -818,7 +818,8 @@ MonoBehaviour:
   maxAccel: 25
   realignStrength: 0.65
   preserveSpeed: 1
-  maxTurnDegPerSec: 360
+  speedHoldWhenMisaligned: 0.15
+  maxTurnDegPerSec: 180
   clumpRadius: 2.2
   clumpSeparationX: 9
   idleClumpRadius: 2.4

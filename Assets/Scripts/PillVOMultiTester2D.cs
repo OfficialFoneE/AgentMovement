@@ -128,44 +128,54 @@ public class PillVOScenarioTester2D : MonoBehaviour
         if (_agents == null || _agents.Length == 0) return;
 
         float dt = Time.fixedDeltaTime;
-        float maxSteerDv = maxAccel * dt;
+        int iters = Mathf.Max(1, iterations);
 
-        // 1) Compute desired velocities from targets (moving agents only)
+        // IMPORTANT: budgets must be per-iteration because ProjectLocomotion is called iters times.
+        float dtIter = dt / iters;
+        float maxSteerDvIter = maxAccel * dtIter;
+
+        // 1) Desired velocity per agent
         for (int i = 0; i < _agents.Length; i++)
         {
             ref Agent a = ref _agents[i];
 
+            // If you truly want "frozen", keep invMass<=0 as freeze.
+            // Otherwise invMass is pushability and should never be <=0.
             if (a.invMass <= 0f)
             {
-                // If you still ever use invMass<=0 as “frozen”, keep this.
                 _desiredVels[i] = Vector2.zero;
                 continue;
             }
 
-            // If this agent is “idle priority” (pushable) we still want it to settle to zero:
-            if (scenario == Scenario.MovingClumpThroughIdleClump && a.group == 1 /* idle group */)
+            // Idle group: settle to zero desired velocity (can still be pushed by others)
+            if (scenario == Scenario.MovingClumpThroughIdleClump && a.group == 1)
             {
                 _desiredVels[i] = Vector2.zero;
                 continue;
             }
 
-            // Retarget if arrived (behavior depends on scenario)
+            // Retarget if arrived
             Vector2 toT = a.target - a.position;
             if (toT.sqrMagnitude <= arriveRadius * arriveRadius)
                 PickNextTarget(ref a);
 
             toT = a.target - a.position;
-            Vector2 dir = (toT.sqrMagnitude > 1e-6f) ? toT.normalized : a.facing;
+
+            // Fallback direction: use moveAxis (not facing) so locomotion stays consistent
+            Vector2 fallbackDir = (a.moveAxis.sqrMagnitude > 1e-6f) ? a.moveAxis : a.facing;
+            Vector2 dir = (toT.sqrMagnitude > 1e-6f) ? toT.normalized : SafeNormal(fallbackDir);
+
             _desiredVels[i] = dir * speed;
         }
 
-        // 2) Avoidance + realign (Jacobi-style iterations)
+        // 2) Iterative avoidance + goal steering + locomotion projection
         Vector2[] deltaV = new Vector2[_agents.Length];
 
-        for (int iter = 0; iter < Mathf.Max(1, iterations); iter++)
+        for (int iter = 0; iter < iters; iter++)
         {
             System.Array.Clear(deltaV, 0, deltaV.Length);
 
+            // Pairwise avoidance
             for (int i = 0; i < _agents.Length; i++)
             {
                 for (int j = i + 1; j < _agents.Length; j++)
@@ -173,14 +183,13 @@ public class PillVOScenarioTester2D : MonoBehaviour
                     ref Agent A = ref _agents[i];
                     ref Agent B = ref _agents[j];
 
-                    // Both idle/infinite mass => no need
                     if (A.invMass <= 0f && B.invMass <= 0f)
                         continue;
 
                     float spA = Mathf.Max(A.velocity.magnitude, 1e-4f);
                     float spB = Mathf.Max(B.velocity.magnitude, 1e-4f);
 
-                    // Capsule axis comes from moveAxis (the locomotion axis used for prediction stability)
+                    // Capsule axis comes from moveAxis (stable orientation)
                     Vector2 vA_proxy = SafeNormal(A.moveAxis) * spA;
                     Vector2 vB_proxy = SafeNormal(B.moveAxis) * spB;
 
@@ -192,7 +201,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                         out Vector2 vB_proxyNew,
                         out _);
 
-                    // dv must be relative to what you passed in (proxy space)
+                    // dv in proxy space
                     Vector2 dA_half = vA_proxyNew - vA_proxy;
                     Vector2 dB_half = vB_proxyNew - vB_proxy;
 
@@ -202,44 +211,50 @@ public class PillVOScenarioTester2D : MonoBehaviour
                     float wB = B.invMass;
                     float wSum = wA + wB;
 
-                    // guard
                     if (wSum > 1e-6f)
                     {
                         float shareA = wA / wSum;
                         float shareB = wB / wSum;
 
-                        // Apply more of the correction to the more “pushable” agent
                         deltaV[i] += (-full * shareA);
                         deltaV[j] += (full * shareB);
                     }
                 }
             }
 
-            // Apply avoidance + steering back to desired
+            // Apply avoidance + steering + projection (per-iteration budgets)
             for (int i = 0; i < _agents.Length; i++)
             {
                 ref Agent a = ref _agents[i];
+                if (a.invMass <= 0f)
+                {
+                    a.velocity = Vector2.zero;
+                    continue;
+                }
 
-                // 1) Start from current velocity + avoidance
+                Vector2 desired = _desiredVels[i];
+
+                // Command velocity
                 Vector2 vCmd = a.velocity + deltaV[i];
 
-                // 2) Steering back to desired (same idea, but apply into vCmd)
-                Vector2 desired = _desiredVels[i];
+                // Steer toward desired (accel-limited per iteration)
                 Vector2 steer = desired - vCmd;
-                float mag = steer.magnitude;
-                if (mag > maxSteerDv && mag > 1e-6f) steer *= (maxSteerDv / mag);
+                float smag = steer.magnitude;
+                if (smag > maxSteerDvIter && smag > 1e-6f)
+                    steer *= (maxSteerDvIter / smag);
+
                 vCmd += steer * Mathf.Clamp01(realignStrength);
 
-                // Optional hard clamp (good for idle being blasted)
+                // Optional clamp
                 float vmag = vCmd.magnitude;
-                if (vmag > speed && vmag > 1e-6f) vCmd = (vCmd / vmag) * speed;
+                if (vmag > speed && vmag > 1e-6f)
+                    vCmd = (vCmd / vmag) * speed;
 
-                // 3) Project command -> feasible (THIS is what makes car vs hover work)
-                ProjectLocomotion(ref a, vCmd, desired, dt);
+                ProjectLocomotion(ref a, vCmd, desired, dtIter);
             }
         }
 
-        // 3) Integrate (moving only) + bounds + update facing
+        // 3) Integrate + bounds
         for (int i = 0; i < _agents.Length; i++)
         {
             ref Agent a = ref _agents[i];
@@ -249,6 +264,9 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
             if (bounceBounds)
                 BounceInBounds(ref a, _worldCenter, boundsHalfExtents);
+
+            // NOTE: Do NOT update a.facing here.
+            // Facing is controlled inside ProjectLocomotion via FacingMode.
         }
     }
 
@@ -257,7 +275,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
         float maxTurnRad = maxTurnDegPerSec * Mathf.Deg2Rad * dt;
         float maxDv = maxAccel * dt;
 
-        // --- 1) Update moveAxis (car limited, hover near-free) ---
+        // --- 1) Update moveAxis ---
         Vector2 axisDesired =
             (vCmd.sqrMagnitude > 1e-6f) ? vCmd :
             (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
@@ -265,11 +283,11 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
         axisDesired = SafeNormal(axisDesired);
 
-        // axisFreedom=0 -> limited turn, axisFreedom=1 -> almost snap
-        float axisTurn = Mathf.Lerp(maxTurnRad, Mathf.PI, Mathf.Clamp01(a.axisFreedom));
+        float axisFreedom01 = Mathf.Clamp01(a.axisFreedom);
+        float axisTurn = Mathf.Lerp(maxTurnRad, Mathf.PI, axisFreedom01);
         a.moveAxis = RotateTowards2D(a.moveAxis, axisDesired, axisTurn);
 
-        // --- 2) Accel constrain: car only changes along moveAxis, hover changes in any direction ---
+        // --- 2) Accel constrain (car vs hover via axisFreedom) ---
         Vector2 v = a.velocity;
         Vector2 dv = vCmd - v;
 
@@ -277,19 +295,20 @@ public class PillVOScenarioTester2D : MonoBehaviour
         Vector2 dvParallel = Vector2.Dot(dv, axis) * axis;
         Vector2 dvPerp = dv - dvParallel;
 
-        // allow lateral accel proportionally to axisFreedom
-        Vector2 dvAllowed = dvParallel + dvPerp * Mathf.Clamp01(a.axisFreedom);
+        Vector2 dvAllowed = dvParallel + dvPerp * axisFreedom01;
 
-        // overall accel clamp
         float dvmag = dvAllowed.magnitude;
-        if (dvmag > maxDv && dvmag > 1e-6f) dvAllowed *= (maxDv / dvmag);
+        if (dvmag > maxDv && dvmag > 1e-6f)
+            dvAllowed *= (maxDv / dvmag);
 
         v += dvAllowed;
 
         // speed clamp
         float vmag = v.magnitude;
-        if (vmag > speed && vmag > 1e-6f) v = (v / vmag) * speed;
+        if (vmag > speed && vmag > 1e-6f)
+            v = (v / vmag) * speed;
 
+        // Speed-hold controller (your improved preserveSpeed behavior)
         if (preserveSpeed)
         {
             float desiredSpeed = desiredVel.magnitude;
@@ -300,35 +319,30 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 float curSpeed = v.magnitude;
                 Vector2 curDir = (curSpeed > 1e-6f) ? (v / curSpeed) : desiredDir;
 
-                // Alignment: -1 opposite, +1 same.
                 float align = Vector2.Dot(curDir, desiredDir);
 
-                // When badly misaligned, we intentionally allow speed to drop so the agent can turn.
-                // align=-1 -> keep speedHoldWhenMisaligned * desiredSpeed
-                // align=+1 -> keep 1.0 * desiredSpeed
                 float t = Mathf.Clamp01((align + 1f) * 0.5f);
                 float targetSpeed = Mathf.Lerp(speedHoldWhenMisaligned * desiredSpeed, desiredSpeed, t);
 
-                // Move speed toward targetSpeed with accel budget (no instant normalize).
                 float ds = targetSpeed - curSpeed;
                 float dsStep = Mathf.Clamp(ds, -maxDv, maxDv);
 
-                // Apply along current motion direction (or desiredDir if stopped)
                 v += curDir * dsStep;
 
-                // Re-clamp after adjusting speed
                 float vmag2 = v.magnitude;
-                if (vmag2 > speed && vmag2 > 1e-6f) v = (v / vmag2) * speed;
+                if (vmag2 > speed && vmag2 > 1e-6f)
+                    v = (v / vmag2) * speed;
             }
         }
 
         a.velocity = v;
 
-        // --- 3) Update facing according to facingMode ---
-        Vector2 faceDesired = a.facing;
+        // --- 3) Facing update (ONLY here) ---
+        Vector2 faceDesired;
 
         switch (a.facingMode)
         {
+            default:
             case FacingMode.LinkedToMoveAxis:
                 faceDesired = a.moveAxis;
                 break;
@@ -348,13 +362,12 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 break;
         }
 
-        // Face turn: cars already link to moveAxis; hovers turn visually at the same limit (fine for tester)
         a.facing = RotateTowards2D(a.facing, SafeNormal(faceDesired), maxTurnRad);
 
-        // Ensure car stays linked perfectly (optional, but makes it crisp)
         if (a.facingMode == FacingMode.LinkedToMoveAxis)
             a.facing = a.moveAxis;
     }
+
 
     void OnDrawGizmos()
     {
@@ -379,7 +392,11 @@ public class PillVOScenarioTester2D : MonoBehaviour
                     a.group == 0 ? new Color(0.2f, 1f, 0.2f, 1f) :             // group 0 = green
                                    new Color(0.2f, 0.7f, 1f, 1f);              // group 1 = cyan
 
-                DrawCapsule2D(a.position, a.moveAxis, a.halfLength, a.radius);
+                //DrawCapsule2D(a.position, a.moveAxis, a.halfLength, a.radius);
+                DrawCapsule2D(a.position, a.facing, a.halfLength, a.radius);
+
+                Gizmos.color = new Color(1f, 0.3f, 1f, 0.9f);
+                DrawArrow2D(a.position, a.position + SafeNormal(a.facing) * 0.6f);
             }
 
             if (drawVelocities)
@@ -414,7 +431,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
     private void InitLocomotion(ref Agent a, Vector2 initialMoveDir)
     {
         // Randomize “type”: 50% car-like, 50% hover-like (tweak however you want)
-        bool isCar = false;//Random.value < 0.5f;
+        bool isCar = Random.value < 0.5f;
         a.axisFreedom = isCar ? 0f : 1f;
 
         a.moveAxis = (initialMoveDir.sqrMagnitude > 1e-6f) ? initialMoveDir.normalized : Vector2.right;
