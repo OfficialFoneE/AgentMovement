@@ -509,8 +509,8 @@ Camera:
   m_GameObject: {fileID: 963194225}
   m_Enabled: 1
   serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_ClearFlags: 2
+  m_BackGroundColor: {r: 0.98490566, g: 0.05017436, b: 0.36099747, a: 0}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
@@ -799,8 +799,8 @@ MonoBehaviour:
   scenario: 2
   randomSeed: 1
   agentCount: 30
-  movingCount: 20
-  idleCount: 20
+  movingCount: 10
+  idleCount: 10
   bounceBounds: 0
   boundsHalfExtents: {x: 10, y: 6}
   radius: 0.19
