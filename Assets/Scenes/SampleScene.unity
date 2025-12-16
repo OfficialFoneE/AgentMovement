@@ -802,7 +802,7 @@ MonoBehaviour:
   movingCount: 10
   idleCount: 10
   bounceBounds: 0
-  boundsHalfExtents: {x: 10, y: 6}
+  boundsHalfExtents: {x: 8, y: 5}
   radius: 0.19
   length: 0.82
   varySizes: 1
