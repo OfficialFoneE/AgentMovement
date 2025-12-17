@@ -796,7 +796,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82fa696c18083c140bf2b5ddbd422c07, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  scenario: 0
+  scenario: 1
   randomSeed: 1
   agentCount: 30
   movingCount: 10

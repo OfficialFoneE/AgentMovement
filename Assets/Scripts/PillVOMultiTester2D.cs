@@ -1,4 +1,6 @@
+using Unity.Mathematics;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public class PillVOScenarioTester2D : MonoBehaviour
 {
@@ -20,7 +22,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
     [Header("World / Bounds")]
     public bool bounceBounds = true;
-    public Vector2 boundsHalfExtents = new Vector2(12, 7);
+    public float2 boundsHalfExtents = new float2(12, 7);
 
     [Header("Capsule Shape")]
     public float radius = 0.35f;
@@ -75,16 +77,16 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
     private struct Agent
     {
-        public Vector2 position;
-        public Vector2 velocity;
+        public float2 position;
+        public float2 velocity;
 
-        public Vector2 moveAxis;      // NEW: locomotion axis (car constraint axis)
-        public Vector2 facing;        // keep: visual/aim direction
+        public float2 moveAxis;      // NEW: locomotion axis (car constraint axis)
+        public float2 facing;        // keep: visual/aim direction
 
         public FacingMode facingMode; // NEW
-        public Vector2 aimPoint;      // NEW: used by FacingMode.ToPoint
+        public float2 aimPoint;      // NEW: used by FacingMode.ToPoint
 
-        public Vector2 target;
+        public float2 target;
         public float halfLength;
         public float radius;
 
@@ -94,14 +96,14 @@ public class PillVOScenarioTester2D : MonoBehaviour
     }
 
     private Agent[] _agents;
-    private Vector2[] _desiredVels;
-    private Vector2 _worldCenter;
+    private float2[] _desiredVels;
+    private float2 _worldCenter;
 
     [ContextMenu("Reset Scenario")]
     public void ResetScenario()
     {
         Random.InitState(randomSeed);
-        _worldCenter = (Vector2)transform.position;
+        _worldCenter = (Vector2)(transform.position);
 
         switch (scenario)
         {
@@ -118,7 +120,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 break;
         }
 
-        _desiredVels = new Vector2[_agents.Length];
+        _desiredVels = new float2[_agents.Length];
     }
 
     void OnEnable() => ResetScenario();
@@ -141,30 +143,30 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
             if (a.invMass <= 0f)
             {
-                _desiredVels[i] = Vector2.zero;
+                _desiredVels[i] = float2.zero;
                 continue;
             }
 
             if (scenario == Scenario.MovingClumpThroughIdleClump && a.group == 1)
             {
-                _desiredVels[i] = Vector2.zero;
+                _desiredVels[i] = float2.zero;
                 continue;
             }
 
-            Vector2 toT = a.target - a.position;
-            if (toT.sqrMagnitude <= arriveRadius * arriveRadius)
+            float2 toT = a.target - a.position;
+            if (math.lengthsq(toT) <= arriveRadius * arriveRadius)
                 PickNextTarget(ref a);
 
             toT = a.target - a.position;
 
-            Vector2 fallbackDir = (a.facing.sqrMagnitude > 1e-6f) ? a.facing : a.moveAxis;
-            Vector2 dir = (toT.sqrMagnitude > 1e-6f) ? toT.normalized : SafeNormal(fallbackDir);
+            float2 fallbackDir = (math.lengthsq(a.facing) > 1e-6f) ? a.facing : a.moveAxis;
+            float2 dir = (math.lengthsq(toT) > 1e-6f) ? math.normalize(toT) : SafeNormal(fallbackDir);
 
             _desiredVels[i] = dir * speed;
         }
 
         // 2) Iterative avoidance + steer + projection
-        Vector2[] deltaV = new Vector2[_agents.Length];
+        float2[] deltaV = new float2[_agents.Length];
 
         for (int iter = 0; iter < iters; iter++)
         {
@@ -182,7 +184,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                         continue;
 
                     // Compute ONE correction vector for the whole capsule pair
-                    Vector2 full = ComputeAvoidanceCorrection_MultiCircle(
+                    float2 full = ComputeAvoidanceCorrection_MultiCircle(
                         A.position, A.velocity, SafeNormal(A.facing), A.halfLength, A.radius,
                         B.position, B.velocity, SafeNormal(B.facing), B.halfLength, B.radius,
                         horizonSeconds, extraSeparation, maxDeltaSpeed, minResponseTime);
@@ -192,7 +194,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                     float wB = B.invMass;
                     float wSum = wA + wB;
 
-                    if (wSum > 1e-6f && full.sqrMagnitude > 1e-12f)
+                    if (wSum > 1e-6f && math.lengthsq(full) > 1e-12f)
                     {
                         float shareA = wA / wSum;
                         float shareB = wB / wSum;
@@ -210,25 +212,25 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
                 if (a.invMass <= 0f)
                 {
-                    a.velocity = Vector2.zero;
+                    a.velocity = float2.zero;
                     continue;
                 }
 
-                Vector2 desired = _desiredVels[i];
+                float2 desired = _desiredVels[i];
 
                 // Command velocity
-                Vector2 vCmd = a.velocity + deltaV[i];
+                float2 vCmd = a.velocity + deltaV[i];
 
                 // Goal steering (per-iter accel budget)
-                Vector2 steer = desired - vCmd;
-                float smag = steer.magnitude;
+                float2 steer = desired - vCmd;
+                float smag = math.length(steer);
                 if (smag > maxSteerDvIter && smag > 1e-6f)
                     steer *= (maxSteerDvIter / smag);
 
                 vCmd += steer * Mathf.Clamp01(realignStrength);
 
                 // Optional clamp for stability
-                float vmag = vCmd.magnitude;
+                float vmag = math.length(vCmd);
                 if (vmag > speed && vmag > 1e-6f)
                     vCmd = (vCmd / vmag) * speed;
 
@@ -252,7 +254,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
         }
     }
 
-    private void ProjectLocomotion(ref Agent a, Vector2 vCmd, Vector2 desiredVel, float dt)
+    private void ProjectLocomotion(ref Agent a, float2 vCmd, float2 desiredVel, float dt)
     {
         float maxTurnRad = maxTurnDegPerSec * Mathf.Deg2Rad * dt;
         float maxDv = maxAccel * dt;
@@ -262,20 +264,20 @@ public class PillVOScenarioTester2D : MonoBehaviour
         // --- 1) Update moveAxis ---
         // For car-like agents (axisFreedom ~ 0), aim the body axis toward the GOAL, not the command.
         // This lets avoidance temporarily push velocity backwards without immediately flipping the body.
-        Vector2 axisDesired;
+        float2 axisDesired;
 
         if (axisFreedom01 < 1e-3f)
         {
             axisDesired =
-                (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
-                (a.moveAxis.sqrMagnitude > 1e-6f) ? a.moveAxis :
+                (math.lengthsq(desiredVel) > 1e-6f) ? desiredVel :
+                (math.lengthsq(a.moveAxis) > 1e-6f) ? a.moveAxis :
                 vCmd;
         }
         else
         {
             axisDesired =
-                (vCmd.sqrMagnitude > 1e-6f) ? vCmd :
-                (desiredVel.sqrMagnitude > 1e-6f) ? desiredVel :
+                (math.lengthsq(vCmd) > 1e-6f) ? vCmd :
+                (math.lengthsq(desiredVel) > 1e-6f) ? desiredVel :
                 a.moveAxis;
         }
 
@@ -285,38 +287,38 @@ public class PillVOScenarioTester2D : MonoBehaviour
         a.moveAxis = RotateTowards2D(a.moveAxis, axisDesired, axisTurn);
 
         // --- 2) Accel constrain: car only along moveAxis, hover full 2D ---
-        Vector2 v = a.velocity;
-        Vector2 dv = vCmd - v;
+        float2 v = a.velocity;
+        float2 dv = vCmd - v;
 
-        Vector2 axis = SafeNormal(a.moveAxis);
-        Vector2 dvParallel = Vector2.Dot(dv, axis) * axis;
-        Vector2 dvPerp = dv - dvParallel;
+        float2 axis = SafeNormal(a.moveAxis);
+        float2 dvParallel = math.dot(dv, axis) * axis;
+        float2 dvPerp = dv - dvParallel;
 
-        Vector2 dvAllowed = dvParallel + dvPerp * axisFreedom01;
+        float2 dvAllowed = dvParallel + dvPerp * axisFreedom01;
 
-        float dvmag = dvAllowed.magnitude;
+        float dvmag = math.length(dvAllowed);
         if (dvmag > maxDv && dvmag > 1e-6f)
             dvAllowed *= (maxDv / dvmag);
 
         v += dvAllowed;
 
         // clamp max speed
-        float vmag = v.magnitude;
+        float vmag = math.length(v);
         if (vmag > speed && vmag > 1e-6f)
             v = (v / vmag) * speed;
 
         // Speed hold controller (your improved preserveSpeed behavior)
         if (preserveSpeed)
         {
-            float desiredSpeed = desiredVel.magnitude;
+            float desiredSpeed = math.length(desiredVel);
             if (desiredSpeed > 1e-6f)
             {
-                Vector2 desiredDir = desiredVel / desiredSpeed;
+                float2 desiredDir = desiredVel / desiredSpeed;
 
-                float curSpeed = v.magnitude;
-                Vector2 curDir = (curSpeed > 1e-6f) ? (v / curSpeed) : desiredDir;
+                float curSpeed = math.length(v);
+                float2 curDir = (curSpeed > 1e-6f) ? (v / curSpeed) : desiredDir;
 
-                float align = Vector2.Dot(curDir, desiredDir);
+                float align = math.dot(curDir, desiredDir);
 
                 float t = Mathf.Clamp01((align + 1f) * 0.5f);
                 float targetSpeed = Mathf.Lerp(speedHoldWhenMisaligned * desiredSpeed, desiredSpeed, t);
@@ -326,7 +328,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
                 v += curDir * dsStep;
 
-                float vmag2 = v.magnitude;
+                float vmag2 = math.length(v);
                 if (vmag2 > speed && vmag2 > 1e-6f)
                     v = (v / vmag2) * speed;
             }
@@ -335,7 +337,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
         a.velocity = v;
 
         // --- 3) Facing update (this defines BODY axis used by the physical collider) ---
-        Vector2 faceDesired;
+        float2 faceDesired;
 
         switch (a.facingMode)
         {
@@ -345,17 +347,17 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 break;
 
             case FacingMode.ToVelocity:
-                faceDesired = (a.velocity.sqrMagnitude > 1e-6f) ? a.velocity : a.moveAxis;
+                faceDesired = (math.lengthsq(a.velocity) > 1e-6f) ? a.velocity : a.moveAxis;
                 break;
 
             case FacingMode.ToDestination:
                 faceDesired = (a.target - a.position);
-                if (faceDesired.sqrMagnitude < 1e-6f) faceDesired = a.moveAxis;
+                if (math.lengthsq(faceDesired) < 1e-6f) faceDesired = a.moveAxis;
                 break;
 
             case FacingMode.ToPoint:
                 faceDesired = (a.aimPoint - a.position);
-                if (faceDesired.sqrMagnitude < 1e-6f) faceDesired = a.moveAxis;
+                if (math.lengthsq(faceDesired) < 1e-6f) faceDesired = a.moveAxis;
                 break;
         }
 
@@ -365,9 +367,9 @@ public class PillVOScenarioTester2D : MonoBehaviour
             a.facing = a.moveAxis;
     }
 
-    private Vector2 ComputeAvoidanceCorrection_MultiCircle(
-    Vector2 cA, Vector2 vA, Vector2 axisA, float halfLenA, float rA,
-    Vector2 cB, Vector2 vB, Vector2 axisB, float halfLenB, float rB,
+    private float2 ComputeAvoidanceCorrection_MultiCircle(
+    float2 cA, float2 vA, float2 axisA, float halfLenA, float rA,
+    float2 cB, float2 vB, float2 axisB, float halfLenB, float rB,
     float horizon, float extraSep, float maxDelta, float minRespTime)
     {
         float R = (rA + rB + extraSep);
@@ -376,26 +378,26 @@ public class PillVOScenarioTester2D : MonoBehaviour
         int nA = GetCircleSampleCount(halfLenA, rA);
         int nB = GetCircleSampleCount(halfLenB, rB);
 
-        Vector2 vRel = vB - vA;
+        float2 vRel = vB - vA;
 
         float bestDelta = 0f;
-        Vector2 bestN = Vector2.zero;
+        float2 bestN = float2.zero;
 
         // Offsets along capsule axis from -halfLen..+halfLen
         for (int ia = 0; ia < nA; ia++)
         {
             float ta = (nA == 1) ? 0.5f : (ia / (float)(nA - 1));
             float offA = Mathf.Lerp(-halfLenA, +halfLenA, ta);
-            Vector2 pA = cA + axisA * offA;
+            float2 pA = cA + axisA * offA;
 
             for (int ib = 0; ib < nB; ib++)
             {
                 float tb = (nB == 1) ? 0.5f : (ib / (float)(nB - 1));
                 float offB = Mathf.Lerp(-halfLenB, +halfLenB, tb);
-                Vector2 pB = cB + axisB * offB;
+                float2 pB = cB + axisB * offB;
 
                 // Disc-disc VO check (returns required outward deltaSpeed along normal)
-                ComputeDiscAvoidance(pA, pB, vRel, R, horizon, minRespTime, out Vector2 n, out float delta);
+                ComputeDiscAvoidance(pA, pB, vRel, R, horizon, minRespTime, out float2 n, out float delta);
 
                 if (delta > bestDelta)
                 {
@@ -405,8 +407,8 @@ public class PillVOScenarioTester2D : MonoBehaviour
             }
         }
 
-        if (bestDelta <= 0f || bestN.sqrMagnitude < 1e-8f)
-            return Vector2.zero;
+        if (bestDelta <= 0f || math.lengthsq(bestN) < 1e-8f)
+            return float2.zero;
 
         if (maxDelta > 0f)
             bestDelta = Mathf.Min(bestDelta, maxDelta);
@@ -424,50 +426,50 @@ public class PillVOScenarioTester2D : MonoBehaviour
     }
 
     private static void ComputeDiscAvoidance(
-    Vector2 pA, Vector2 pB,
-    Vector2 vRel,
+    float2 pA, float2 pB,
+    float2 vRel,
     float R,
     float horizon,
     float minRespTime,
-    out Vector2 n,
+    out float2 n,
     out float deltaSpeed)
     {
-        Vector2 p = pB - pA;
-        float dist = p.magnitude;
+        float2 p = pB - pA;
+        float dist = math.length(p);
 
         // If already overlapping (or extremely close), push apart immediately.
         if (dist < R)
         {
-            n = (dist > 1e-6f) ? (p / dist) : Vector2.right;
+            n = (dist > 1e-6f) ? (p / dist) : new float2(1, 0);
             float tau = Mathf.Max(minRespTime, 1e-4f);
             deltaSpeed = (R - dist) / tau;
             return;
         }
 
-        float v2 = vRel.sqrMagnitude;
+        float v2 = math.lengthsq(vRel);
         if (v2 < 1e-10f)
         {
             // Not moving relative to each other; no predicted collision if currently separated.
-            n = Vector2.zero;
+            n = float2.zero;
             deltaSpeed = 0f;
             return;
         }
 
         // Time of closest approach in [0, horizon]
-        float t = -Vector2.Dot(p, vRel) / v2;
+        float t = -math.dot(p, vRel) / v2;
         if (t <= 0f || t > horizon)
         {
-            n = Vector2.zero;
+            n = float2.zero;
             deltaSpeed = 0f;
             return;
         }
 
-        Vector2 closest = p + vRel * t;
-        float d = closest.magnitude;
+        float2 closest = p + vRel * t;
+        float d = math.length(closest);
 
         if (d >= R)
         {
-            n = Vector2.zero;
+            n = float2.zero;
             deltaSpeed = 0f;
             return;
         }
@@ -476,14 +478,14 @@ public class PillVOScenarioTester2D : MonoBehaviour
         n = (d > 1e-6f) ? (closest / d) : SafePerp(SafeNormal(vRel));
         float tau2 = Mathf.Max(minRespTime, t);
 
-        float vRelN = Vector2.Dot(vRel, n);
+        float vRelN = math.dot(vRel, n);
         float requiredOut = (R - d) / tau2;
 
         deltaSpeed = requiredOut - vRelN;
         if (deltaSpeed < 0f) deltaSpeed = 0f;
     }
 
-    private static Vector2 SafePerp(Vector2 v) => new Vector2(-v.y, v.x);
+    private static float2 SafePerp(float2 v) => new float2(-v.y, v.x);
 
 
     void OnDrawGizmos()
@@ -536,22 +538,22 @@ public class PillVOScenarioTester2D : MonoBehaviour
         }
     }
 
-    private static Vector2 SafeNormal(Vector2 v)
+    private static float2 SafeNormal(float2 v)
     {
-        float sq = v.sqrMagnitude;
-        return sq > 1e-8f ? v / Mathf.Sqrt(sq) : Vector2.right;
+        float sq = math.lengthsq(v);
+        return sq > 1e-8f ? v / Mathf.Sqrt(sq) : new float2(1, 0);
     }
 
 
     // ---------------- Scenario Spawning ----------------
 
-    private void InitLocomotion(ref Agent a, Vector2 initialMoveDir)
+    private void InitLocomotion(ref Agent a, float2 initialMoveDir)
     {
         // Randomize “type”: 50% car-like, 50% hover-like (tweak however you want)
         bool isCar = Random.value < 0.5f;
         a.axisFreedom = isCar ? 0f : 1f;
 
-        a.moveAxis = (initialMoveDir.sqrMagnitude > 1e-6f) ? initialMoveDir.normalized : Vector2.right;
+        a.moveAxis = (math.lengthsq(initialMoveDir) > 1e-6f) ? math.normalize(initialMoveDir) : new float2(1, 0);
 
         if (isCar)
         {
@@ -577,9 +579,9 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            Vector2 pos = _worldCenter + Random.insideUnitCircle * (Mathf.Min(boundsHalfExtents.x, boundsHalfExtents.y) * 0.8f);
-            Vector2 dir = Random.insideUnitCircle.normalized;
-            if (dir.sqrMagnitude < 1e-6f) dir = Vector2.right;
+            float2 pos = _worldCenter + (float2)Random.insideUnitCircle * (Mathf.Min(boundsHalfExtents.x, boundsHalfExtents.y) * 0.8f);
+            float2 dir = Random.insideUnitCircle.normalized;
+            if (math.lengthsq(dir) < 1e-6f) dir = new float2(1, 0);
 
             float r = radius;
             float hl = Mathf.Max(0f, length * 0.5f);
@@ -609,8 +611,8 @@ public class PillVOScenarioTester2D : MonoBehaviour
     {
         _agents = new Agent[count];
 
-        Vector2 leftCenter = _worldCenter + new Vector2(-clumpSeparationX * 0.5f, 0f);
-        Vector2 rightCenter = _worldCenter + new Vector2(+clumpSeparationX * 0.5f, 0f);
+        float2 leftCenter = _worldCenter + new float2(-clumpSeparationX * 0.5f, 0f);
+        float2 rightCenter = _worldCenter + new float2(+clumpSeparationX * 0.5f, 0f);
 
         int half = count / 2;
 
@@ -618,11 +620,11 @@ public class PillVOScenarioTester2D : MonoBehaviour
         {
             bool leftGroup = i < half;
 
-            Vector2 c = leftGroup ? leftCenter : rightCenter;
-            Vector2 pos = c + Random.insideUnitCircle * clumpRadius;
+            float2 c = leftGroup ? leftCenter : rightCenter;
+            float2 pos = c + (float2)Random.insideUnitCircle * clumpRadius;
 
-            Vector2 desiredDir = leftGroup ? Vector2.right : Vector2.left;
-            Vector2 vel = desiredDir * speed;
+            float2 desiredDir = leftGroup ? new float2(1, 0) : new float2(-1, 0);
+            float2 vel = desiredDir * speed;
 
             float r = radius;
             float hl = Mathf.Max(0f, length * 0.5f);
@@ -633,9 +635,9 @@ public class PillVOScenarioTester2D : MonoBehaviour
             }
 
             // Targets are “other side”, and we ping-pong when reached (see PickNextTarget).
-            Vector2 target = leftGroup
-                ? (_worldCenter + new Vector2(+boundsHalfExtents.x * 0.9f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y)))
-                : (_worldCenter + new Vector2(-boundsHalfExtents.x * 0.9f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y)));
+            float2 target = leftGroup
+                ? (_worldCenter + new float2(+boundsHalfExtents.x * 0.9f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y)))
+                : (_worldCenter + new float2(-boundsHalfExtents.x * 0.9f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y)));
 
             _agents[i] = new Agent
             {
@@ -657,16 +659,16 @@ public class PillVOScenarioTester2D : MonoBehaviour
     {
         _agents = new Agent[movers + idlers];
 
-        Vector2 moveCenter = _worldCenter + new Vector2(-boundsHalfExtents.x * 0.75f, 0f);
-        Vector2 idleCenter = _worldCenter; // center clump
+        float2 moveCenter = _worldCenter + new float2(-boundsHalfExtents.x * 0.75f, 0f);
+        float2 idleCenter = _worldCenter; // center clump
 
         // moving clump (group 0)
         for (int i = 0; i < movers; i++)
         {
-            Vector2 pos = moveCenter + Random.insideUnitCircle * clumpRadius;
+            float2 pos = moveCenter + (float2)Random.insideUnitCircle * clumpRadius;
 
-            Vector2 desiredDir = Vector2.right;
-            Vector2 vel = desiredDir * speed;
+            float2 desiredDir = new float2(1, 0);
+            float2 vel = desiredDir * speed;
 
             float r = radius;
             float hl = Mathf.Max(0f, length * 0.5f);
@@ -676,7 +678,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 hl *= Random.Range(0.75f, 1.25f);
             }
 
-            Vector2 target = _worldCenter + new Vector2(+boundsHalfExtents.x * 0.85f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y));
+            float2 target = _worldCenter + new float2(+boundsHalfExtents.x * 0.85f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y));
 
             _agents[i] = new Agent
             {
@@ -698,7 +700,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
         {
             int i = movers + k;
 
-            Vector2 pos = idleCenter + Random.insideUnitCircle * idleClumpRadius;
+            float2 pos = idleCenter + (float2)Random.insideUnitCircle * idleClumpRadius;
 
             float r = radius;
             float hl = Mathf.Max(0f, length * 0.5f);
@@ -712,8 +714,8 @@ public class PillVOScenarioTester2D : MonoBehaviour
             _agents[i] = new Agent
             {
                 position = pos,
-                velocity = Vector2.zero,
-                facing = Random.insideUnitCircle.sqrMagnitude > 1e-6f ? Random.insideUnitCircle.normalized : Vector2.right,
+                velocity = float2.zero,
+                facing = math.lengthsq(Random.insideUnitCircle) > 1e-6f ? Random.insideUnitCircle.normalized : new float2(1, 0),
                 target = pos,
                 radius = r,
                 halfLength = hl,
@@ -741,7 +743,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 // Ping-pong across X (keeps dense crossings continuous)
                 float x = a.position.x - _worldCenter.x;
                 float sign = (x >= 0f) ? -1f : +1f;
-                a.target = _worldCenter + new Vector2(sign * boundsHalfExtents.x * 0.9f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y));
+                a.target = _worldCenter + new float2(sign * boundsHalfExtents.x * 0.9f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y));
                 break;
 
             case Scenario.MovingClumpThroughIdleClump:
@@ -749,7 +751,7 @@ public class PillVOScenarioTester2D : MonoBehaviour
                 if (a.group == 0)
                 {
                     float side = (a.position.x - _worldCenter.x) >= 0f ? -1f : +1f;
-                    a.target = _worldCenter + new Vector2(side * boundsHalfExtents.x * 0.85f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y));
+                    a.target = _worldCenter + new float2(side * boundsHalfExtents.x * 0.85f, Random.Range(-boundsHalfExtents.y, boundsHalfExtents.y));
                 }
                 break;
         }
@@ -757,16 +759,16 @@ public class PillVOScenarioTester2D : MonoBehaviour
 
     // ---------------- Utility / Gizmos ----------------
 
-    private static Vector2 RandomPointInBounds(Vector2 center, Vector2 halfExt)
+    private static float2 RandomPointInBounds(float2 center, float2 halfExt)
     {
-        return center + new Vector2(
+        return center + new float2(
             Random.Range(-halfExt.x, halfExt.x),
             Random.Range(-halfExt.y, halfExt.y));
     }
 
-    private static void BounceInBounds(ref Agent a, Vector2 center, Vector2 halfExt)
+    private static void BounceInBounds(ref Agent a, float2 center, float2 halfExt)
     {
-        Vector2 p = a.position - center;
+        float2 p = a.position - center;
 
         if (p.x < -halfExt.x) { p.x = -halfExt.x; if (a.invMass > 0f) a.velocity.x = Mathf.Abs(a.velocity.x); }
         if (p.x > halfExt.x) { p.x = halfExt.x; if (a.invMass > 0f) a.velocity.x = -Mathf.Abs(a.velocity.x); }
@@ -776,16 +778,16 @@ public class PillVOScenarioTester2D : MonoBehaviour
         a.position = center + p;
     }
 
-    private static Vector2 RotateTowards2D(Vector2 from, Vector2 to, float maxRadians)
+    private static float2 RotateTowards2D(float2 from, float2 to, float maxRadians)
     {
-        if (from.sqrMagnitude < 1e-8f) from = Vector2.right;
-        if (to.sqrMagnitude < 1e-8f) return from.normalized;
+        if (math.lengthsq(from) < 1e-8f) from = new float2(1, 0);
+        if (math.lengthsq(to) < 1e-8f) return math.normalize(from);
 
-        from.Normalize();
-        to.Normalize();
+        from = math.normalize(from);
+        to = math.normalize(to);
 
         float cross = from.x * to.y - from.y * to.x;
-        float dot = Mathf.Clamp(Vector2.Dot(from, to), -1f, 1f);
+        float dot = Mathf.Clamp(math.dot(from, to), -1f, 1f);
         float angle = Mathf.Atan2(cross, dot);
 
         float step = Mathf.Clamp(angle, -maxRadians, maxRadians);
@@ -793,39 +795,39 @@ public class PillVOScenarioTester2D : MonoBehaviour
         float s = Mathf.Sin(step);
         float c = Mathf.Cos(step);
 
-        return new Vector2(from.x * c - from.y * s, from.x * s + from.y * c);
+        return new float2(from.x * c - from.y * s, from.x * s + from.y * c);
     }
 
-    private static void DrawCapsule2D(Vector2 center, Vector2 direction, float halfLen, float radius)
+    private static void DrawCapsule2D(float2 center, float2 direction, float halfLen, float radius)
     {
-        Vector2 dir = direction.normalized; //(velocity.sqrMagnitude > 1e-8f) ? velocity.normalized : (facing.sqrMagnitude > 1e-8f ? facing.normalized : Vector2.right);
-        Vector2 a = center - dir * halfLen;
-        Vector2 b = center + dir * halfLen;
+        float2 dir = math.normalize(direction); //(velocity.sqrMagnitude > 1e-8f) ? velocity.normalized : (facing.sqrMagnitude > 1e-8f ? facing.normalized : new float2(1, 0));
+        float2 a = center - dir * halfLen;
+        float2 b = center + dir * halfLen;
 
         Gizmos.DrawLine(ToV3(a), ToV3(b));
         Gizmos.DrawWireSphere(ToV3(a), radius);
         Gizmos.DrawWireSphere(ToV3(b), radius);
     }
 
-    private static void DrawArrow2D(Vector2 from, Vector2 to)
+    private static void DrawArrow2D(float2 from, float2 to)
     {
         Gizmos.DrawLine(ToV3(from), ToV3(to));
 
-        Vector2 d = to - from;
-        if (d.sqrMagnitude < 1e-8f) return;
+        float2 d = to - from;
+        if (math.lengthsq(d) < 1e-8f) return;
 
-        Vector2 dir = d.normalized;
-        Vector2 left = new Vector2(-dir.y, dir.x);
+        float2 dir = math.normalize(d);
+        float2 left = new float2(-dir.y, dir.x);
 
         float headLen = 0.12f;
         float headWid = 0.08f;
 
-        Vector2 p1 = to - dir * headLen + left * headWid;
-        Vector2 p2 = to - dir * headLen - left * headWid;
+        float2 p1 = to - dir * headLen + left * headWid;
+        float2 p2 = to - dir * headLen - left * headWid;
 
         Gizmos.DrawLine(ToV3(to), ToV3(p1));
         Gizmos.DrawLine(ToV3(to), ToV3(p2));
     }
 
-    private static Vector3 ToV3(Vector2 v) => new Vector3(v.x, v.y, 0f);
+    private static float3 ToV3(float2 v) => new float3(v.x, v.y, 0f);
 }
